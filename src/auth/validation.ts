@@ -19,8 +19,8 @@ export function validateRegistration(values: RegistrationValues): RegistrationEr
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
     errors.email = 'Enter a valid email address.';
   }
-  if (values.password.length < 10 || values.password.length > 128) {
-    errors.password = 'Use a password between 10 and 128 characters.';
+  if (values.password.length < 8 || values.password.length > 12) {
+    errors.password = 'Use a password between 8 and 12 characters.';
   } else if (!/[a-z]/.test(values.password) || !/[A-Z]/.test(values.password) || !/\d/.test(values.password)) {
     errors.password = 'Include at least one lowercase letter, one uppercase letter and one number.';
   }
@@ -38,8 +38,4 @@ export function validateLogin(login: string, password: string): string | null {
   if (!login.trim()) return 'Enter your username or email.';
   if (!password) return 'Enter your password.';
   return null;
-}
-
-export function validateVerificationCode(code: string): string | null {
-  return /^\d{6}$/.test(code) ? null : 'Enter the 6-digit verification code.';
 }

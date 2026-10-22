@@ -2,18 +2,18 @@
 
 ## 1. Objetivo
 
-Construir una aplicacion movil nativa para Android, con toda la interfaz en ingles, que permita registrar usuarios, iniciar sesion, explorar y administrar torneos, participar en eventos y consultar perfiles y rankings. La aplicacion priorizara el funcionamiento offline y almacenara los datos de negocio en SQLite local, de acuerdo con los requisitos del spec.
+Construir una aplicacion movil nativa para Android, con toda la interfaz en ingles, que permita registrar usuarios, iniciar sesion, explorar y administrar torneos, participar en eventos y consultar perfiles y rankings. La aplicacion funciona completamente online, requiriendo conexion a internet para todas sus funcionalidades, incluyendo registro e inicio de sesion. Los datos se almacenan en SQLite local.
 
 ## 2. Alcance del proyecto y del MVP
 
 ### MVP
 
-- Registro, inicio de sesion, cierre de sesion, verificacion y recuperacion de cuenta (RF-01 a RF-03, RF-02.1).
+- Registro, inicio de sesion y cierre de sesion (RF-01 a RF-03).
 - Navegacion principal y contextual entre Home, Torneos, Eventos y Perfil (RF-04, RF-18).
 - Home, consulta, busqueda, filtrado y detalle de torneos (RF-05 a RF-07).
 - Creacion, edicion, publicacion e inscripcion basica a torneos (RF-08 a RF-10).
 - Perfil y preferencias principales (RF-13 y RF-14).
-- Persistencia local, validaciones, seguridad y uso sin conexion para operaciones locales.
+- Persistencia local en SQLite, validaciones, seguridad y funcionamiento online para todas las operaciones.
 - Interfaz, textos, mensajes y contenido estatico en ingles (RNF-05).
 
 ### Fases posteriores al MVP
@@ -34,8 +34,8 @@ Las fases posteriores forman parte del alcance total del proyecto, aunque no del
 - **Arquitectura:** componentes de UI, tipos, hooks de acceso a datos y capa de base de datos separadas.
 - **Navegacion:** navegacion movil con pantallas independientes y retorno mediante el back stack.
 - **Idioma:** ingles para todos los elementos visibles de la aplicacion; no se ofrecera selector de idioma en esta version (RNF-05).
-- **Seguridad local:** no guardar contrasenas en texto plano; almacenar un hash o mecanismo seguro equivalente y proteger los datos locales.
-- **Compatibilidad offline:** las operaciones de consulta y gestion local deben funcionar sin servidor externo; los flujos de correo y notificaciones remotas requieren definir un servicio y su comportamiento sin conexion.
+- **Seguridad:** no guardar contrasenas en texto plano; almacenar hashes con Argon2id y proteger los datos de sesion.
+- **Conectividad:** la aplicacion funciona completamente online, requiriendo conexion a internet para todas las funcionalidades.
 
 ## 4. Fases de trabajo
 
@@ -95,15 +95,13 @@ Si las rutas o menus cambian entre versiones de Android Studio, usar **SDK Manag
 
 1. Implementar las pantallas de registro e inicio de sesion.
 2. Validar nombre de usuario, correo y contrasena antes de escribir en SQLite.
-3. Crear el flujo de verificacion de cuenta con codigo de seis digitos.
-4. Implementar el flujo de inicio de sesion con verificacion de dos factores mediante codigo de seis digitos enviado al correo.
-5. Implementar el cierre de sesion con eliminacion segura de la sesion y redireccion al login.
-6. Mantener el estado de sesion y proteger las pantallas que requieren usuario autenticado.
-7. Preparar una interfaz de servicio para sustituir el flujo local por JWT/OAuth2 cuando exista un backend.
+3. Implementar el flujo de inicio de sesion con validacion de credenciales.
+4. Implementar el cierre de sesion con eliminacion segura de la sesion y redireccion al login.
+5. Mantener el estado de sesion y proteger las pantallas que requieren usuario autenticado.
 
-**Entregable:** usuario registrado y autenticado localmente con validaciones funcionales.
+**Entregable:** usuario registrado y autenticado online con validaciones funcionales; la cuenta queda activa al registrarse, sin verificadores de cuenta ni flujo de restablecimiento de contrasena (Exclusiones del Modulo A del spec).
 
-**Verificacion del desarrollador:** registrar un usuario valido, intentar registros con campos vacios, correo invalido y contrasena insegura, verificar la cuenta con codigo de seis digitos, iniciar sesion con credenciales correctas y verificar el codigo de seis digitos enviado al correo, cerrar sesion y verificar que la sesion se elimina correctamente, rechazar credenciales incorrectas y codigos invalidos o expirados.
+**Verificacion del desarrollador:** registrar un usuario valido, intentar registros con campos vacios, correo invalido y contrasena insegura, iniciar sesion con credenciales correctas, cerrar sesion y verificar que la sesion se elimina correctamente, rechazar credenciales incorrectas.
 
 **Criterio de salida:** solo se crean usuarios validos, la contrasena no se almacena en texto plano, la sesion se mantiene correctamente y las pantallas protegidas bloquean usuarios no autenticados.
 
@@ -111,14 +109,14 @@ Si las rutas o menus cambian entre versiones de Android Studio, usar **SDK Manag
 
 1. Implementar la pantalla de listado de torneos.
 2. Agregar busqueda por texto.
-3. Agregar filtros por tipo de juego y pais.
+3. Agregar filtros por estado, fecha y alcance.
 4. Permitir abrir el detalle de un torneo.
 5. Mostrar acciones de administracion solo para los torneos creados por el usuario.
 6. Implementar el hook `useTournaments` para centralizar las consultas SQLite.
 
 **Entregable:** catalogo local consultable, filtrable y administrable.
 
-**Verificacion del desarrollador:** cargar torneos de prueba, buscar por texto, aplicar filtros por juego y pais, combinar filtros, abrir un detalle y comprobar que las acciones de administracion solo aparecen para el creador.
+**Verificacion del desarrollador:** cargar torneos de prueba, buscar por nombre, juego u organizador, aplicar filtros por estado, fecha y alcance, combinar filtros, abrir un detalle y comprobar que las acciones de administracion solo aparecen para el creador.
 
 **Criterio de salida:** el listado refleja los datos de SQLite, la busqueda y los filtros devuelven resultados correctos, y los estados de lista vacia y error son visibles.
 
@@ -143,14 +141,14 @@ Si las rutas o menus cambian entre versiones de Android Studio, usar **SDK Manag
 2. Verificar persistencia despues de cerrar y volver a abrir la aplicacion.
 3. Probar validaciones con datos vacios, fechas invalidas y contrasenas inseguras.
 4. Verificar busqueda y filtros combinados.
-5. Comprobar que el uso principal funcione sin conexion.
+5. Comprobar que el uso principal funcione con conexión a internet.
 6. Generar el paquete Android y documentar la instalacion.
 
 **Entregable:** version candidata del MVP y paquete compatible con Android.
 
-**Verificacion del desarrollador:** ejecutar la lista completa de pruebas en un dispositivo Android limpio, repetir los flujos despues de reiniciar la aplicacion, desconectar la red, revisar la interfaz y generar el paquete Android.
+**Verificacion del desarrollador:** ejecutar la lista completa de pruebas en un dispositivo Android limpio, repetir los flujos despues de reiniciar la aplicacion, revisar la interfaz y generar el paquete Android.
 
-**Criterio de salida:** los requisitos MVP asignados a las fases 1 a 7 funcionan sin regresiones, la persistencia local se conserva sin conexion, la interfaz esta en ingles, no hay bloqueos durante el uso principal y el paquete se instala correctamente.
+**Criterio de salida:** los requisitos MVP asignados a las fases 1 a 7 funcionan sin regresiones, la persistencia local se conserva, la interfaz esta en ingles, no hay bloqueos durante el uso principal con conexión a internet y el paquete se instala correctamente.
 
 ### Fase 8 - Inscripciones, eventos y perfil completo
 
@@ -181,7 +179,7 @@ Si las rutas o menus cambian entre versiones de Android Studio, usar **SDK Manag
 ### Fase 10 - Roles, notificaciones y administracion
 
 1. Aplicar permisos para Usuario, Organizador y Administrador en pantallas y operaciones (RF-16).
-2. Implementar notificaciones para verificaciones, inscripciones, horarios, partidas, resultados e invitaciones (RF-15).
+2. Implementar notificaciones para inscripciones, horarios, partidas, resultados e invitaciones (RF-15).
 3. Implementar las funciones administrativas para usuarios, roles, catalogos, reportes, parametros globales y auditoria (RF-17).
 4. Registrar acciones administrativas y validar acceso no autorizado.
 
@@ -193,8 +191,8 @@ Si las rutas o menus cambian entre versiones de Android Studio, usar **SDK Manag
 
 ### Fase 11 - Validacion integral y entrega final
 
-1. Ejecutar pruebas de aceptacion para RF-01 a RF-18 y RNF-01 a RNF-05.
-2. Verificar flujos offline y documentar dependencias que requieran correo o servicios externos.
+1. Ejecutar pruebas de aceptacion para RF-01 a RF-18 y RNF-01 a RNF-06.
+2. Verificar flujos online y documentar dependencias que requieran conexión a internet.
 3. Revisar todas las pantallas contra `UI_AppTorneos.pdf` y probar navegacion contextual.
 4. Generar y validar el paquete Android final.
 
@@ -210,7 +208,6 @@ Si las rutas o menus cambian entre versiones de Android Studio, usar **SDK Manag
 - `username`
 - `email`
 - `password_hash`
-- `is_verified`
 - `role`
 - `created_at`
 
@@ -246,21 +243,21 @@ El modelo se incorporara por fases; las tablas no necesarias para el MVP pueden 
 ## 6. Criterios de aceptacion
 
 - Cada requisito RF-01 a RF-18 debe estar asociado a una fase, una pantalla o servicio responsable y una prueba de aceptacion antes de marcarse como completado.
-- El registro, inicio de sesion, verificacion y recuperacion validan los datos y estados definidos; las contrasenas no se almacenan en texto plano.
+- El registro, inicio de sesion y cierre de sesion validan los datos y estados definidos; las contrasenas no se almacenan en texto plano.
 - Home y la navegacion permiten acceder a Torneos, Eventos y Perfil, y al volver de un detalle conservan la seccion de origen y su contexto.
-- La busqueda y los filtros de torneos contemplan nombre, juego, organizador, pais, fecha, estado, visibilidad y alcance.
+- La busqueda de torneos contempla nombre, juego y organizador; los filtros se limitan a estado, fecha y alcance.
 - La creacion, publicacion, edicion, cancelacion, cierre e inscripcion respetan fechas, cupos, requisitos, permisos y persistencia local.
 - Los eventos muestran estados y calendario; las partidas, resultados, disputas y clasificaciones se actualizan de forma consistente.
 - El perfil presenta informacion, historial, estadisticas y ranking disponibles, y solo permite editar campos autorizados.
 - Los roles limitan las acciones permitidas; la administracion global y las acciones sensibles quedan registradas.
 - Toda la interfaz, navegacion, mensajes y contenido estatico se presenta en ingles (RNF-05), sin preferencia de cambio de idioma.
-- Los datos locales persisten en SQLite y las operaciones locales definidas funcionan sin conexion; las dependencias de red se documentan y prueban por separado.
-- La aplicacion cumple RNF-01 a RNF-04 y muestra estados de carga, vacio, error y validacion en los flujos correspondientes.
+- Los datos persisten en SQLite local y todas las operaciones requieren conexion a internet para funcionar correctamente.
+- La aplicacion cumple RNF-01 a RNF-06 y muestra estados de carga, vacio, error y validacion en los flujos correspondientes.
 
 ## 7. Riesgos y decisiones pendientes
 
-- **Offline frente a verificacion y recuperacion por correo:** RF-03 requiere correo y tokens temporales, mientras el producto se define como offline. Antes de implementar el flujo final se debe decidir si el correo real requiere conectividad, o si se acepta un modo local/simulado; no se debe presentar el modo simulado como envio real.
-- **JWT/OAuth2 frente a autonomia local:** JWT/OAuth2 presupone un servicio de identidad. Se recomienda encapsularlo en una interfaz para usar autenticacion local durante el MVP y cambiar de proveedor sin modificar las pantallas.
+- **Resolucion de modo online:** La aplicacion funciona completamente online. Todas las funcionalidades requieren conexion a internet, incluyendo registro e inicio de sesion. Esta decision esta resuelta y documentada en T-002.
+- **JWT/OAuth2 frente a autenticacion actual:** La autenticacion actual usa correo y contrasena. JWT/OAuth2 presupone un servicio de identidad. Se recomienda encapsularlo en una interfaz para cambiar de proveedor sin modificar las pantallas si se requiere en el futuro.
 - **Cifrado de SQLite:** Expo SQLite ofrece persistencia local, pero la proteccion de secretos debe definirse antes de produccion. Las credenciales y claves sensibles deben usar almacenamiento seguro del dispositivo y hashing apropiado.
 - **Documentos de UI y casos de uso:** antes de cerrar la implementacion se deben contrastar las pantallas con `UI_AppTorneos.pdf` y el alcance de los casos de uso con el diagrama referenciado en `spec.md`.
 
@@ -289,12 +286,12 @@ El portafolio `UI_AppTorneos.pdf` contiene 18 pantallas o estados visuales. El d
 | --- | --- | --- |
 | Perfil, preferencias y juego favorito | Fases 3 y 8 | Comprobar datos visibles y editables, preferencias permitidas y acceso desde la navegacion principal. |
 | Estadisticas, ranking e historial | Fases 2, 8 y 9 | Verificar el modelo local y estados vacios/con datos para ranking e historial. |
-| Recuperacion y cambio de contrasena | Fase 4 | Validar campos, confirmacion, codigo temporal y rechazo de valores invalidos. |
-| Verificacion de correo y reenvio | Fase 4 | Comprobar estado pendiente, expiracion, confirmacion y reenvio; distinguir modo simulado de servicio real. |
 | Listado, filtros, detalle, creacion y administracion de torneos | Fases 5, 6 y 8 | Probar filtros del spec, acciones por rol, inscripcion, edicion y retorno al contexto. |
 | Navegacion inferior, Home, Eventos y estados | Fases 1, 3 y 8 | Recorrer las cuatro secciones, revisar carga/vacio/error y probar navegacion contextual en Android. |
 | Brackets, partidas y resultados | Fase 9 | Completar un flujo de torneo con registro y publicacion de resultados. |
 | Interfaz en ingles | Todas las fases | Revisar pantallas, validaciones, notificaciones y estados para asegurar que no queden textos visibles en otro idioma. |
+
+Las pantallas de recuperacion/cambio de contrasena y de verificacion de correo presentes en el portafolio quedan excluidas del alcance: el spec establece que el sistema no utiliza verificadores de cuenta ni flujo de restablecimiento de contrasena (Exclusiones del Modulo A).
 
 **Criterio de validacion del punto 6:** cada pantalla del portafolio debe estar asignada a una ruta o componente del proyecto, conservar su flujo de navegacion y superar una prueba visual y funcional en un emulador o dispositivo Android. Las pantallas que dependan de funcionalidades fuera del MVP deben quedar registradas como pendientes, no como funcionalidades terminadas.
 
@@ -302,7 +299,7 @@ El portafolio `UI_AppTorneos.pdf` contiene 18 pantallas o estados visuales. El d
 
 | Modulo | Casos de uso considerados | Cobertura en el plan |
 | --- | --- | --- |
-| A. Login, registro y recuperacion de cuenta | Registro, verificacion, reenvio, inicio de sesion y recuperacion | Fase 4; dependencia del envio real de correo registrada como decision pendiente. |
+| A. Login, registro y cierre de sesion | Registro, inicio de sesion y cierre de sesion | Fase 4; dependencia del modo online registrada como decision resuelta. |
 | B. Home y navegacion inferior | Feed de Home, cuatro pestañas, detalle y retorno al contexto | Fases 1, 3 y 5; se valida navegacion contextual en Fase 8. |
 | C. Gestion y participacion en torneos | Consulta, filtros, detalle, creacion, publicacion, inscripcion y administracion | Fases 5, 6 y 8; el alcance de filtros sigue RF-06. |
 | D. Eventos, partidas y resultados | Eventos proximos/activos/finalizados, calendario, brackets, partidas y resultados | Fases 8 y 9; requiere pruebas de autorizacion y consistencia de clasificaciones. |

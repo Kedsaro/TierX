@@ -3,14 +3,28 @@ import type { ReactNode } from 'react';
 import { useSQLiteContext } from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 import { createAuthService } from './authService';
-import { createResendEmailProvider } from './resendEmailProvider';
 import type { AuthenticatedUser, AuthService } from './authService';
 
 const SESSION_KEY = 'tierx.auth.user-id';
 
+// Reading from SecureStore immediately after a cold app start can
+// intermittently return null even when a session was previously saved: the
+// Android Keystore-backed cipher it relies on is not always ready yet right
+// after process start. A null result is indistinguishable from "no session",
+// so retry a couple of times with a short backoff before concluding there is
+// none; a real logged-out user only pays a small, bounded extra delay.
+async function readSessionIdWithRetry(): Promise<string | null> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const storedId = await SecureStore.getItemAsync(SESSION_KEY);
+    if (storedId) return storedId;
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+  }
+  return null;
+}
+
 class SecureSessionStore {
   async readUserId(): Promise<number | null> {
-    const storedId = await SecureStore.getItemAsync(SESSION_KEY);
+    const storedId = await readSessionIdWithRetry();
     if (!storedId || !/^\d+$/.test(storedId)) return null;
     return Number(storedId);
   }
@@ -29,8 +43,6 @@ interface AuthContextValue {
   isLoading: boolean;
   authService: AuthService;
   signIn: (login: string, password: string) => Promise<void>;
-  sendLoginCode: (login: string, password: string) => Promise<{ email: string }>;
-  signInWithCode: (login: string, password: string, code: string) => Promise<void>;
   register: (input: { username: string; email: string; password: string; acceptedTerms: boolean }) => ReturnType<AuthService['register']>;
   signOut: () => Promise<void>;
 }
@@ -40,8 +52,7 @@ const sessionStore = new SecureSessionStore();
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const db = useSQLiteContext();
-  const emailProvider = createResendEmailProvider();
-  const [authService] = useState(() => createAuthService(db, sessionStore, emailProvider));
+  const [authService] = useState(() => createAuthService(db, sessionStore));
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -70,13 +81,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await authService.signIn(login, password));
   }
 
-  async function sendLoginCode(login: string, password: string): Promise<{ email: string }> {
-    return await authService.sendLoginCode(login, password);
-  }
-
-  async function signInWithCode(login: string, password: string, code: string): Promise<void> {
-    setUser(await authService.signInWithCode(login, password, code));
-  }
 
   async function signOut(): Promise<void> {
     await authService.signOut();
@@ -84,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, authService, signIn, sendLoginCode, signInWithCode, register: authService.register, signOut }}>
+    <AuthContext.Provider value={{ user, isLoading, authService, signIn, register: authService.register, signOut }}>
       {children}
     </AuthContext.Provider>
   );

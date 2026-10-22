@@ -23,55 +23,52 @@ export async function runAuthIntegrationChecks(db: SQLiteDatabase): Promise<void
   const authService = createAuthService(db, sessionStore);
   const suffix = `${Date.now()}`;
   const email = `auth-check-${suffix}@example.invalid`;
+  const username = `auth-check-${suffix}`;
+  const password = 'TestPass12';
   let userId: number | null = null;
 
   try {
-    const registration = await authService.register({
-      username: `auth-check-${suffix}`,
+    // Registration creates an active account that can sign in immediately
+    await authService.register({
+      username,
       email,
-      password: 'TierX-Test-Password-73',
+      password,
       acceptedTerms: true,
     });
-    userId = registration.user.id;
 
-    const storedUser = await userRepository.getById(db, userId);
-    if (!storedUser || !storedUser.password_hash.startsWith('argon2id$')) {
+    const storedUser = await userRepository.getByLogin(db, email);
+    if (!storedUser) {
+      throw new Error('Registration did not persist the new user.');
+    }
+    userId = storedUser.id;
+    if (!storedUser.password_hash.startsWith('argon2id$')) {
       throw new Error('Password was not stored as an Argon2id hash.');
     }
-    if (storedUser.password_hash.includes('TierX-Test-Password-73')) {
+    if (storedUser.password_hash.includes(password)) {
       throw new Error('Plaintext password was stored in the user record.');
     }
     if (storedUser.terms_accepted_at === null) {
       throw new Error('Terms acceptance timestamp was not recorded.');
     }
-    if (storedUser.is_verified) {
-      throw new Error('New offline account must remain unverified until email verification succeeds.');
-    }
 
-    let pendingLoginRejected = false;
+    let duplicateRejected = false;
     try {
-      await authService.signIn(email, 'TierX-Test-Password-73');
-    } catch (error) {
-      pendingLoginRejected = error instanceof AuthError && error.code === 'EMAIL_NOT_VERIFIED';
+      await authService.register({
+        username,
+        email,
+        password,
+        acceptedTerms: true,
+      });
+    } catch {
+      duplicateRejected = true;
     }
-    if (!pendingLoginRejected) {
-      throw new Error('An unverified account was not rejected during sign in.');
-    }
-
-    let emailDeliveryRejected = false;
-    try {
-      await authService.sendVerificationCode(email);
-    } catch (error) {
-      emailDeliveryRejected = error instanceof AuthError && error.code === 'EMAIL_PROVIDER_UNAVAILABLE';
-    }
-    if (!emailDeliveryRejected) {
-      throw new Error('Missing email provider was not reported as unavailable.');
+    if (!duplicateRejected) {
+      throw new Error('A duplicate username/email registration was not rejected.');
     }
 
-    await userRepository.setVerified(db, userId);
-    const signedInUser = await authService.signIn(email, 'TierX-Test-Password-73');
+    const signedInUser = await authService.signIn(email, password);
     if (signedInUser.id !== userId || 'password_hash' in signedInUser) {
-      throw new Error('Verified user sign in returned an invalid public session.');
+      throw new Error('Sign in returned an invalid public session.');
     }
     const restoredUser = await authService.restoreSession();
     if (restoredUser?.id !== userId) {
@@ -80,7 +77,7 @@ export async function runAuthIntegrationChecks(db: SQLiteDatabase): Promise<void
 
     let incorrectPasswordRejected = false;
     try {
-      await authService.signIn(email, 'Wrong-password-73');
+      await authService.signIn(email, 'WrongPass12');
     } catch (error) {
       incorrectPasswordRejected = error instanceof AuthError && error.code === 'INVALID_CREDENTIALS';
     }

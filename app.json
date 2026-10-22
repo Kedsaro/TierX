@@ -24,8 +24,21 @@
       "bundler": "metro"
     },
     "plugins": [
-      "expo-sqlite",
+      [
+        "expo-sqlite",
+        {
+          "android": {
+            "useSQLCipher": true
+          }
+        }
+      ],
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f517cc25-b243-4484-914c-0a5b0fe06c0f"
+      }
+    },
+    "owner": "kedasaro"
   }
 }

@@ -4,7 +4,6 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../../auth/AuthProvider';
-import { AuthError } from '../../auth/authService';
 import { validateRegistration } from '../../auth/validation';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -33,13 +32,10 @@ export function RegisterScreen({ navigation }: Props) {
 
     setIsSubmitting(true);
     try {
-      const result = await register({ username, email, password, acceptedTerms });
-      navigation.replace('Verification', { email: result.email });
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'Unable to create your account.';
-      setSubmitError(cause instanceof AuthError && cause.code === 'EMAIL_PROVIDER_UNAVAILABLE'
-        ? message
-        : 'An account with this username or email may already exist. Check your details and try again.');
+      await register({ username, email, password, acceptedTerms });
+      navigation.popToTop();
+    } catch {
+      setSubmitError('An account with this username or email may already exist. Check your details and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -84,7 +80,7 @@ export function RegisterScreen({ navigation }: Props) {
             error={errors.password}
             label="Password"
             onChangeText={setPassword}
-            hint="10-128 characters; include uppercase, lowercase and a number."
+            hint="8-12 characters; include uppercase, lowercase and a number."
             placeholder="Create a password"
             secureTextEntry
             value={password}
@@ -122,7 +118,7 @@ export function RegisterScreen({ navigation }: Props) {
 
         <View className="mt-4 flex-row items-start gap-2 px-1">
           <ShieldCheck color="#176b5b" size={17} />
-          <Text className="flex-1 text-xs leading-5 text-[#65736c]">Passwords are stored as Argon2id hashes. Email verification requires an online provider.</Text>
+          <Text className="flex-1 text-xs leading-5 text-[#65736c]">Passwords are stored as Argon2id hashes.</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
