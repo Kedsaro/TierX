@@ -1,5 +1,5 @@
 export const DATABASE_NAME = 'tierx.db';
-export const DATABASE_VERSION = 3;
+export const DATABASE_VERSION = 4;
 
 export const migrations: Record<number, string> = {
   1: `
@@ -173,6 +173,37 @@ export const migrations: Record<number, string> = {
   `,
   3: `
     ALTER TABLE users ADD COLUMN terms_accepted_at TEXT;
+  `,
+  4: `
+    INSERT OR IGNORE INTO games (name, category) VALUES
+      ('Valorant', 'FPS'),
+      ('Counter-Strike 2', 'FPS'),
+      ('League of Legends', 'MOBA'),
+      ('Dota 2', 'MOBA'),
+      ('EA Sports FC', 'Sports'),
+      ('Rocket League', 'Sports'),
+      ('Street Fighter 6', 'Fighting'),
+      ('Super Smash Bros. Ultimate', 'Fighting'),
+      ('Chess', 'Board'),
+      ('Fortnite', 'Battle Royale');
+
+    INSERT OR IGNORE INTO countries (name, code, region) VALUES
+      ('United States', 'US', 'Americas'),
+      ('Canada', 'CA', 'Americas'),
+      ('Mexico', 'MX', 'Americas'),
+      ('Brazil', 'BR', 'Americas'),
+      ('Colombia', 'CO', 'Americas'),
+      ('Argentina', 'AR', 'Americas'),
+      ('Chile', 'CL', 'Americas'),
+      ('Peru', 'PE', 'Americas'),
+      ('Spain', 'ES', 'Europe'),
+      ('France', 'FR', 'Europe'),
+      ('Germany', 'DE', 'Europe'),
+      ('United Kingdom', 'GB', 'Europe'),
+      ('Italy', 'IT', 'Europe'),
+      ('Japan', 'JP', 'Asia'),
+      ('South Korea', 'KR', 'Asia'),
+      ('Australia', 'AU', 'Oceania');
   `,
 };
 

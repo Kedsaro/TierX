@@ -1,18 +1,17 @@
 # Especificación: App de Torneos (Gestor Local)
 
 ## 1. Propósito del Producto
-La aplicación permite a los usuarios organizar, administrar y realizar el seguimiento de eventos de deportes electrónicos a nivel local de forma 100% autónoma y offline. A través de una plataforma interactiva e individual, el usuario puede registrar torneos, configurar participantes, gestionar las reglas de competencia y registrar los resultados de eventos casuales o de alto rendimiento.
+La aplicación permite a los usuarios organizar, administrar y realizar el seguimiento de eventos de deportes electrónicos a nivel local de forma 100% online. A través de una plataforma interactiva e individual, el usuario puede registrar torneos, configurar participantes, gestionar las reglas de competencia y registrar los resultados de eventos casuales o de alto rendimiento.
 
-La plataforma incorpora un sistema de simulación de ranking local que clasifica a los jugadores registrados en el dispositivo según su desempeño, facilitando el control de los emparejamientos y promoviendo un historial organizado del desarrollo competitivo de la comunidad local sin depender de servidores externos.
+La plataforma incorpora un sistema de ranking que clasifica a los jugadores registrados según su desempeño, facilitando el control de los emparejamientos y promoviendo un historial organizado del desarrollo competitivo de la comunidad local. Todas las funcionalidades requieren conexión a internet para su funcionamiento, incluyendo registro e inicio de sesión.
 
 ## 2. Requerimientos Funcionales
 - **RF-01 — Registro de usuario:** El sistema deberá permitir crear una cuenta con nombre de usuario, correo electrónico, contraseña, confirmación de contraseña y aceptación de términos.
-- **RF-02 — Inicio de sesión:** El sistema deberá permitir iniciar sesión con correo o nombre de usuario y contraseña, mostrar errores de validación, verificar la identidad mediante un código temporal de seis dígitos enviado al correo y conservar la sesión mientras sea válida.
-- **RF-02.1 — Cierre de sesión:** El sistema deberá permitir cerrar sesión de forma segura, eliminando la sesión activa y redirigiendo al usuario a la pantalla de inicio de sesión.
-- **RF-03 — Verificación y recuperación de cuenta:** El sistema deberá permitir verificar el correo mediante enlace, reenviar la verificación, solicitar recuperación y establecer una nueva contraseña mediante un token temporal.
+- **RF-02 — Inicio de sesión:** El sistema deberá permitir iniciar sesión con correo o nombre de usuario y contraseña, mostrar errores de validación y conservar la sesión mientras sea válida.
+- **RF-03 — Cierre de sesión:** El sistema deberá permitir cerrar sesión de forma segura, eliminando la sesión activa y redirigiendo al usuario a la pantalla de inicio de sesión.
 - **RF-04 — Navegación principal:** Después de autenticarse, el usuario deberá acceder a una barra de navegación inferior con las pestañas **Home**, **Torneos**, **Eventos** y **Perfil**. La pestaña activa deberá identificarse visualmente.
 - **RF-05 — Página Home:** El sistema deberá mostrar torneos próximos, eventos destacados, actividad del usuario, ranking relevante y accesos rápidos para explorar o crear torneos.
-- **RF-06 — Consulta de torneos:** La sección **Torneos** deberá permitir visualizar torneos públicos, propios y seguidos, buscarlos por nombre, juego u organizador, y filtrarlos por juego, país, fecha, estado, visibilidad y alcance.
+- **RF-06 — Consulta de torneos:** La sección **Torneos** deberá permitir visualizar torneos públicos, propios y seguidos, buscarlos por nombre, juego u organizador, y filtrarlos por estado, fecha y alcance.
 - **RF-07 — Detalle de torneo:** El sistema deberá mostrar identidad visual, descripción, juego, organizador, fecha, hora, zona horaria, país, alcance, reglas, requisitos, cupos, participantes, estado, calendario y acciones disponibles según el rol.
 - **RF-08 — Creación y edición de torneo:** El usuario autorizado deberá poder configurar nombre, descripción, imagen, juego, país, zona horaria, fechas, visibilidad, alcance, cupos, formato, reglas, requisitos, premios y periodo de inscripción.
 - **RF-09 — Administración de torneos:** El organizador deberá poder guardar borradores, publicar, editar, despublicar, cancelar, cerrar, compartir torneos y gestionar sus inscripciones y participantes.
@@ -21,54 +20,47 @@ La plataforma incorpora un sistema de simulación de ranking local que clasifica
 - **RF-12 — Partidas y resultados:** El organizador autorizado deberá poder configurar fases y brackets, asignar partidas, actualizar horarios, registrar marcadores, resolver disputas, publicar resultados y actualizar clasificaciones.
 - **RF-13 — Perfil:** La sección **Perfil** deberá mostrar avatar, nombre, descripción, país, juego favorito, estadísticas, ranking global o local, historial de torneos, torneos creados y configuración de cuenta.
 - **RF-14 — Edición de perfil y preferencias:** El usuario podrá modificar la información permitida, preferencias de notificaciones, privacidad y datos de su cuenta.
-- **RF-15 — Notificaciones:** El sistema deberá informar sobre verificaciones, inscripciones, cambios de horario, inicio de partidas, resultados, invitaciones y actualizaciones de torneos seguidos.
+- **RF-15 — Notificaciones:** El sistema deberá informar sobre inscripciones, cambios de horario, inicio de partidas, resultados, invitaciones y actualizaciones de torneos seguidos.
 - **RF-16 — Roles y permisos:** El sistema deberá diferenciar como mínimo los roles **Usuario**, **Organizador** y **Administrador**, y mostrar únicamente las acciones autorizadas para cada rol.
 - **RF-17 — Administración global:** El administrador deberá poder gestionar usuarios, roles, juegos, países, reglas, torneos reportados, reportes, parámetros globales y auditoría.
 - **RF-18 — Navegación contextual:** Desde Home, Torneos, Eventos y Perfil, el usuario podrá abrir el detalle de un torneo y volver a la sección de origen conservando filtros, posición y contexto.
 
 ## 3. Requerimientos No Funcionales
 - **RNF-01 — Aplicación móvil nativa:** Desarrollada exclusivamente para la plataforma Android mediante empaquetado compatible.
-- **RNF-02 — Persistencia y Seguridad Local:** Toda la información de los torneos, usuarios y contraseñas se almacenará de forma cifrada o segura dentro del almacenamiento privado del dispositivo mediante SQLite.
+- **RNF-02 — Persistencia y Seguridad:** Toda la información de los torneos, usuarios y contraseñas se almacenará de forma segura. Las contraseñas se almacenarán como hashes usando Argon2id, y los datos de sesión se gestionarán de forma segura. La aplicación requiere conexión a internet para todas sus funcionalidades.
 - **RNF-03 — Usabilidad Móvil:** La interfaz estará diseñada con patrones móviles (gestos, listas verticales, inputs nativos) organizando claramente el registro, búsquedas y flujos de creación.
-- **RNF-04 — Validación de datos:** El sistema validará que los campos obligatorios (fechas válidas, nombres no vacíos, contraseñas seguras) se cumplan antes de realizar escrituras en la base de datos local.
+- **RNF-04 — Validación de datos:** El sistema validará que los campos obligatorios (fechas válidas, nombres no vacíos, contraseñas seguras) se cumplan antes de realizar escrituras en la base de datos.
 - **RNF-05 — Idioma de la aplicación:** Toda la interfaz, navegación, mensajes y contenido estático de la aplicación se presentará en inglés.
+- **RNF-06 — Conectividad:** La aplicación requiere conexión a internet activa para todas sus funcionalidades, incluyendo registro, inicio de sesión y todas las operaciones de torneos.
 
 ## 4. Descomposición Funcional por Módulos (Casos de Uso)
 El modelado de los casos de uso del sistema se encuentra detallado en el siguiente archivo:
 digramaDeCasosDeUsoTIERX.pdf
 
-### Módulo A: Login, Registro y Recuperación de Cuenta
+### Módulo A: Login y Registro
 Controla el acceso inicial a la plataforma y el ciclo de vida de la sesión.
 
-**User Journey A1 — Registro y verificación:**
+**User Journey A1 — Registro:**
 1. El visitante entra a la página de bienvenida y selecciona **Registrarse**.
 2. El sistema muestra el formulario de nombre, correo, contraseña, confirmación y términos.
 3. El visitante envía el formulario; el sistema valida campos, unicidad y seguridad.
-4. Si los datos son válidos, el sistema crea la cuenta en estado pendiente y muestra confirmación.
-5. El cliente renderiza la interfaz de verificación con una máscara de entrada restringida a 6 caracteres numéricos. Al ingresar el código recibido por correo, el sistema valida la coincidencia exacta del token y comprueba que el tiempo de vida (TTL) no haya expirado.
-6. El sistema activa la cuenta y dirige al usuario a **Iniciar sesión**.
-7. El usuario inicia sesión y el sistema lo redirige a **Home**.
+4. Si los datos son válidos, el sistema crea la cuenta activa, sin requerir verificación de correo ni códigos de confirmación.
+5. El usuario inicia sesión y el sistema lo redirige a **Home**.
 
 **User Journey A2 — Inicio de sesión:**
 1. El visitante selecciona **Iniciar sesión**.
 2. Ingresa correo o usuario y contraseña.
-3. El sistema valida credenciales y envía un código temporal de seis dígitos al correo del usuario.
-4. El cliente renderiza la interfaz de verificación con una máscara de entrada restringida a 6 caracteres numéricos. Al ingresar el código recibido por correo, el sistema valida la coincidencia exacta del token y comprueba que el tiempo de vida (TTL) no haya expirado.
-5. Si son correctas, crea la sesión y abre **Home**; si son incorrectas, conserva el formulario y muestra el error.
+3. El sistema valida credenciales y crea la sesión.
+4. El sistema abre **Home**; si las credenciales son incorrectas, conserva el formulario y muestra el error.
 
-**User Journey A2.1 — Cierre de sesión:**
+**User Journey A3 — Cierre de sesión:**
 1. El usuario autenticado navega a la sección **Perfil**.
 2. Selecciona la opción **Cerrar sesión** (Sign out/Logout).
 3. El sistema elimina la sesión activa del almacenamiento seguro.
 4. El usuario es redirigido a la pantalla de **Iniciar sesión**.
 5. La sesión anterior ya no es válida y el usuario debe autenticarse nuevamente para acceder.
 
-**User Journey A3 — Recuperación:**
-1. El usuario selecciona **¿Olvidaste tu contraseña?**.
-2. Ingresa su correo y solicita recuperación.
-3. El sistema envía un codigo de 6 digitos al correo del usuario.
-4. El cliente renderiza la interfaz de verificación con una máscara de entrada restringida a 6 caracteres numéricos. Al ingresar el código recibido por correo, el sistema valida la coincidencia exacta del token y comprueba que el tiempo de vida (TTL) no haya expirado.
-5. El sistema confirma el cambio y vuelve a **Iniciar sesión**.
+**Exclusiones del Módulo A:** El sistema no utiliza verificadores de cuenta de ningún tipo (códigos de verificación de correo, enlaces de confirmación ni verificación en dos pasos) y no incluye flujo de restablecimiento o recuperación de contraseña.
 
 ### Módulo B: Home y Navegación Inferior
 Es el punto de entrada después del login y conecta **Home**, **Torneos**, **Eventos** y **Perfil**.
@@ -91,7 +83,7 @@ Es el punto de entrada después del login y conecta **Home**, **Torneos**, **Eve
 Implementa la pestaña **Torneos** para explorar competencias y administrar las competecias en la que el usuario ha participado.
 
 **User Journey C1 — Buscar y consultar un torneo:**
-1. Desde **Torneos**, aplica filtros por país, fecha, estado, visibilidad o juego.
+1. Desde **Torneos**, aplica filtros por estado, fecha o alcance.
 2. El feed vertical compuesto exclusivamente por cuatro colecciones horizontales: On going comp. Tournaments, On going non-comp. Tournaments, Past comp. Tournaments y Past non-comp. Tournaments, el cual es modificado gracias a la busqueda y filtros ingresados.
 3. El usuario selecciona una tarjeta y el sistema abre el detalle.
 4. El usuario consulta reglas, requisitos, cupos, participantes y calendario.
@@ -168,7 +160,7 @@ Amplía la gestión de torneos para organizadores autorizados.
 ## 5. Stack Tecnológico
 - **Framework:** React Native (Expo) + TypeScript
 - **Estilos:** NativeWind (Tailwind CSS para React Native)
-- **Base de datos Local:** SQLite (mediante [Expo SQLite](https://expo.dev)) para gestionar de forma relacional los usuarios, torneos y rankings directamente en el almacenamiento interno de Android.
+- **Base de datos:** SQLite (mediante [Expo SQLite](https://expo.dev)) para gestionar de forma relacional los usuarios, torneos y rankings. La aplicación funciona completamente online, requiriendo conexión a internet para todas las operaciones.
 
 ## 6. Diseño UI
 La documentación de las pantallas e interfaces se encuentra disponible en el portafolio de diseño adjunto en la carpeta del proyecto:

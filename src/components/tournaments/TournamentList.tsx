@@ -1,10 +1,10 @@
 import { FlatList, View } from 'react-native';
-import type { Tournament } from '../../types/tournament';
+import type { Tournament, TournamentSummary } from '../../types/tournament';
 import { FeedbackState } from '../ui/FeedbackState';
 import { TournamentCard } from './TournamentCard';
 
 interface TournamentListProps {
-  tournaments: Tournament[];
+  tournaments: TournamentSummary[];
   isLoading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -49,7 +49,13 @@ export function TournamentList({
       data={tournaments}
       keyExtractor={(tournament) => String(tournament.id)}
       renderItem={({ item }) => (
-        <TournamentCard tournament={item} onPress={() => onTournamentPress?.(item)} />
+        <TournamentCard
+          countryName={item.country_name}
+          gameName={item.game_name}
+          onPress={() => onTournamentPress?.(item)}
+          organizerName={item.organizer_username}
+          tournament={item}
+        />
       )}
       showsVerticalScrollIndicator={false}
       ItemSeparatorComponent={() => <View className="h-0" />}

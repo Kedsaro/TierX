@@ -9,8 +9,8 @@ import {
 
 export async function runDatabaseIntegrationChecks(db: SQLiteDatabase): Promise<void> {
   const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-  if (version?.user_version !== 3) {
-    throw new Error(`Expected database version 3, found ${version?.user_version ?? 0}.`);
+  if (version?.user_version !== 4) {
+    throw new Error(`Expected database version 4, found ${version?.user_version ?? 0}.`);
   }
 
   const requiredTables = [
@@ -30,6 +30,12 @@ export async function runDatabaseIntegrationChecks(db: SQLiteDatabase): Promise<
   const foreignKeys = await db.getFirstAsync<{ foreign_keys: number }>('PRAGMA foreign_keys');
   if (foreignKeys?.foreign_keys !== 1) {
     throw new Error('SQLite foreign key enforcement is disabled.');
+  }
+
+  const seededGames = await gameRepository.list(db);
+  const seededCountries = await countryRepository.list(db);
+  if (seededGames.length === 0 || seededCountries.length === 0) {
+    throw new Error('Baseline games/countries catalog was not seeded.');
   }
 
   const suffix = `${Date.now()}`;
@@ -121,6 +127,40 @@ export async function runDatabaseIntegrationChecks(db: SQLiteDatabase): Promise<
     }
     if (!rejectedInvalidTournament) {
       throw new Error('Invalid tournament constraint check failed.');
+    }
+
+    let rejectedDuplicateUsername = false;
+    try {
+      await userRepository.create(db, {
+        username: `db-check-${suffix}`,
+        email: `db-check-duplicate-${suffix}@example.invalid`,
+        password_hash: 'test-hash-only',
+        terms_accepted: true,
+      });
+    } catch {
+      rejectedDuplicateUsername = true;
+    }
+    if (!rejectedDuplicateUsername) {
+      throw new Error('Duplicate username uniqueness check failed.');
+    }
+
+    let rejectedInvalidForeignKey = false;
+    try {
+      await tournamentRepository.create(db, {
+        name: `Invalid FK tournament ${suffix}`,
+        game_id: -1,
+        country_id: countryId,
+        organizer_id: userId,
+        timezone: 'UTC',
+        start_at: '2030-01-01T12:00:00.000Z',
+        format: 'single_elimination',
+        capacity: 8,
+      });
+    } catch {
+      rejectedInvalidForeignKey = true;
+    }
+    if (!rejectedInvalidForeignKey) {
+      throw new Error('Invalid foreign key constraint check failed.');
     }
 
     await tournamentRepository.delete(db, tournamentId);

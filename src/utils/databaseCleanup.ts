@@ -1,5 +1,10 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { userRepository } from '../database/repositories';
+import {
+  countryRepository,
+  gameRepository,
+  tournamentRepository,
+  userRepository,
+} from '../database/repositories';
 import { hashPassword } from '../auth/passwordHash';
 
 /**
@@ -88,7 +93,7 @@ export async function listAllUsers(db: SQLiteDatabase): Promise<{ users: any[]; 
 export async function createTestUser(db: SQLiteDatabase, email: string): Promise<{ user: any; password: string }> {
   try {
     const testUsername = 'testuser';
-    const testPassword = 'TestPassword123';
+    const testPassword = 'TestPass12';
     const passwordHash = await hashPassword(testPassword);
     
     // Check if user already exists by username or email
@@ -115,9 +120,8 @@ export async function createTestUser(db: SQLiteDatabase, email: string): Promise
       terms_accepted: true,
     });
     
-    // Verify the user automatically for testing
     await userRepository.setVerified(db, userId);
-    
+
     const user = await userRepository.getById(db, userId);
     if (!user) {
       throw new Error('Failed to retrieve created user');
@@ -127,11 +131,165 @@ export async function createTestUser(db: SQLiteDatabase, email: string): Promise
     console.log(`  - Username: ${user.username}`);
     console.log(`  - Email: ${user.email}`);
     console.log(`  - Password: ${testPassword}`);
-    console.log(`  - Verified: Yes`);
+    console.log(`  - Verified: ${user.is_verified ? 'Yes' : 'No'}`);
     
     return { user, password: testPassword };
   } catch (error) {
     console.error('Error creating test user:', error);
     throw error;
   }
+}
+
+const DEMO_GAMES: { name: string; category: string }[] = [
+  { name: 'Valorant', category: 'FPS' },
+  { name: 'Chess', category: 'Board' },
+  { name: 'Street Fighter 6', category: 'Fighting' },
+  { name: 'Rocket League', category: 'Sports' },
+];
+
+const DEMO_COUNTRIES: { name: string; code: string; region: string }[] = [
+  { name: 'United States', code: 'US', region: 'Americas' },
+  { name: 'Colombia', code: 'CO', region: 'Americas' },
+  { name: 'Japan', code: 'JP', region: 'Asia' },
+];
+
+async function ensureDemoCatalog(db: SQLiteDatabase) {
+  const games = await gameRepository.list(db);
+  const countries = await countryRepository.list(db);
+
+  for (const game of DEMO_GAMES) {
+    if (!games.some((existing) => existing.name.toLowerCase() === game.name.toLowerCase())) {
+      await gameRepository.create(db, game.name, game.category);
+    }
+  }
+  for (const country of DEMO_COUNTRIES) {
+    if (!countries.some((existing) => existing.code === country.code)) {
+      await countryRepository.create(db, country);
+    }
+  }
+
+  return { games: await gameRepository.list(db), countries: await countryRepository.list(db) };
+}
+
+function daysFromNow(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
+/**
+ * Seeds a small, varied set of games, countries and tournaments owned by the
+ * given organizer, and registers the given player for one of them. Useful
+ * for exercising search, filters, segments and the detail screen with real
+ * data instead of only empty states.
+ */
+export async function seedDemoTournaments(
+  db: SQLiteDatabase,
+  organizerId: number,
+  playerId: number,
+): Promise<{ created: number }> {
+  const { games, countries } = await ensureDemoCatalog(db);
+  const findGame = (name: string) => games.find((game) => game.name === name)!.id;
+  const findCountry = (code: string) => countries.find((country) => country.code === code)!.id;
+
+  const tournaments = [
+    {
+      name: 'Winter Valorant Clash',
+      description: 'A fast-paced weekend cup for local Valorant squads.',
+      game_id: findGame('Valorant'),
+      country_id: findCountry('US'),
+      organizer_id: organizerId,
+      timezone: 'UTC',
+      start_at: daysFromNow(3),
+      scope: 'local' as const,
+      visibility: 'public' as const,
+      format: 'single_elimination',
+      capacity: 16,
+      status: 'published' as const,
+    },
+    {
+      name: 'National Chess Open',
+      description: 'The biggest open chess tournament of the season.',
+      game_id: findGame('Chess'),
+      country_id: findCountry('CO'),
+      organizer_id: organizerId,
+      timezone: 'UTC',
+      start_at: daysFromNow(10),
+      scope: 'national' as const,
+      visibility: 'public' as const,
+      format: 'round_robin',
+      capacity: 32,
+      status: 'published' as const,
+    },
+    {
+      name: 'World SF6 Championship',
+      description: 'Top fighters from around the globe compete for the title.',
+      game_id: findGame('Street Fighter 6'),
+      country_id: findCountry('JP'),
+      organizer_id: organizerId,
+      timezone: 'UTC',
+      start_at: daysFromNow(-1),
+      scope: 'international' as const,
+      visibility: 'public' as const,
+      format: 'double_elimination',
+      capacity: 64,
+      status: 'ongoing' as const,
+    },
+    {
+      name: 'Draft Rocket League Cup',
+      description: 'Still being planned; only visible to its organizer.',
+      game_id: findGame('Rocket League'),
+      country_id: findCountry('US'),
+      organizer_id: organizerId,
+      timezone: 'UTC',
+      start_at: daysFromNow(20),
+      scope: 'regional' as const,
+      visibility: 'public' as const,
+      format: 'single_elimination',
+      capacity: 8,
+      status: 'draft' as const,
+    },
+    {
+      name: 'Spring Local Clash',
+      description: 'A completed local tournament, kept for history.',
+      game_id: findGame('Valorant'),
+      country_id: findCountry('US'),
+      organizer_id: organizerId,
+      timezone: 'UTC',
+      start_at: daysFromNow(-10),
+      scope: 'local' as const,
+      visibility: 'public' as const,
+      format: 'single_elimination',
+      capacity: 16,
+      status: 'completed' as const,
+    },
+  ];
+
+  let followedTournamentId: number | null = null;
+  for (const tournament of tournaments) {
+    const id = await tournamentRepository.create(db, tournament);
+    if (tournament.name === 'Winter Valorant Clash') followedTournamentId = id;
+  }
+
+  if (followedTournamentId) {
+    await db.runAsync(
+      'INSERT OR IGNORE INTO registrations (tournament_id, player_id, status) VALUES (?, ?, ?)',
+      followedTournamentId,
+      playerId,
+      'registered',
+    );
+  }
+
+  console.log(`Seeded ${tournaments.length} demo tournaments for organizer ${organizerId}.`);
+  return { created: tournaments.length };
+}
+
+/** Removes every tournament, leaving users, games and countries untouched. */
+export async function clearAllTournaments(db: SQLiteDatabase): Promise<{ deleted: number }> {
+  const all = await tournamentRepository.list(db);
+  for (const tournament of all) {
+    await tournamentRepository.delete(db, tournament.id);
+  }
+  console.log(`Deleted ${all.length} tournaments.`);
+  return { deleted: all.length };
 }
