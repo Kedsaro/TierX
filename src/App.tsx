@@ -11,6 +11,7 @@ import { getDatabaseKey, migrateLegacyDatabase } from './database/encryption';
 import { runDatabaseIntegrationChecks } from './database/integrationChecks';
 import { runAuthIntegrationChecks } from './auth/integrationChecks';
 import { runTournamentManagementIntegrationChecks } from './tournaments/integrationChecks';
+import { runRegistrationIntegrationChecks } from './tournaments/registrationIntegrationChecks';
 import { AppNavigation } from './navigation/AppNavigation';
 
 const navigationTheme = {
@@ -64,8 +65,9 @@ function DatabaseIntegrationCheck() {
     void runDatabaseIntegrationChecks(db)
       .then(() => runAuthIntegrationChecks(db))
       .then(() => runTournamentManagementIntegrationChecks(db))
+      .then(() => runRegistrationIntegrationChecks(db))
       .then(
-        () => console.info('Database, authentication and tournament management integration checks passed.'),
+        () => console.info('Database, authentication, tournament management and registration integration checks passed.'),
         (error: unknown) => console.error('SQLite integration checks failed.', error),
       );
   }, [db]);

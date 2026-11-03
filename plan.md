@@ -11,7 +11,7 @@ Construir una aplicacion movil nativa para Android, con toda la interfaz en ingl
 - Registro, inicio de sesion y cierre de sesion (RF-01 a RF-03).
 - Navegacion principal y contextual entre Home, Torneos, Eventos y Perfil (RF-04, RF-18).
 - Home, consulta, busqueda, filtrado y detalle de torneos (RF-05 a RF-07).
-- Creacion, edicion, publicacion e inscripcion basica a torneos (RF-08 a RF-10).
+- Creacion, edicion, publicacion e inscripcion basica a torneos, incluyendo la seleccion de pais, juego y zona horaria mediante menus desplegables con zona horaria dependiente del pais, y la programacion de las fechas del torneo mediante selectores de calendario y reloj con bloqueo estricto de fechas anteriores a Hoy + 24 horas (RF-08 a RF-10, RF-19, RF-20).
 - Perfil y preferencias principales (RF-13 y RF-14).
 - Persistencia local en SQLite, validaciones, seguridad y funcionamiento online para todas las operaciones.
 - Interfaz, textos, mensajes y contenido estatico en ingles (RNF-05).
@@ -35,6 +35,7 @@ Las fases posteriores forman parte del alcance total del proyecto, aunque no del
 - **Navegacion:** navegacion movil con pantallas independientes y retorno mediante el back stack.
 - **Idioma:** ingles para todos los elementos visibles de la aplicacion; no se ofrecera selector de idioma en esta version (RNF-05).
 - **Seguridad:** no guardar contrasenas en texto plano; almacenar hashes con Argon2id y proteger los datos de sesion.
+- **Fechas del torneo:** los cuatro hitos cronologicos del formulario de torneos (inicio y fin de registro, inicio y fin del torneo) se capturan con `@react-native-community/datetimepicker` (calendario y reloj nativos), sin campos de texto libre, aplicando como minimo seleccionable Hoy + 24 horas (RF-20).
 - **Conectividad:** la aplicacion funciona completamente online, requiriendo conexion a internet para todas las funcionalidades.
 
 ## 4. Fases de trabajo
@@ -122,24 +123,25 @@ Si las rutas o menus cambian entre versiones de Android Studio, usar **SDK Manag
 
 ### Fase 6 - Creacion, detalle y edicion
 
-1. Crear el formulario de nuevo torneo.
-2. Validar fecha y hora, campos obligatorios, visibilidad, alcance y requisitos.
-3. Guardar el torneo validado en SQLite.
-4. Mostrar una vista con todas las especificaciones del torneo creado.
-5. Implementar la edicion y actualizacion del torneo.
-6. Implementar el cierre de la vista y el regreso al listado mediante el back stack.
+1. Crear el formulario de nuevo torneo con seleccion de juego, pais y zona horaria mediante menus desplegables; las opciones de zona horaria se filtran segun el pais elegido y la seleccion se limpia si deja de ser valida (RF-19).
+2. Implementar los campos de inicio de registro, fin de registro, inicio del torneo y finalizacion del torneo con componentes DateTime Picker de calendario y reloj integrados, sin permitir la entrada manual de texto (RF-20).
+3. Validar fecha y hora, campos obligatorios, visibilidad, alcance y requisitos, deshabilitando y bloqueando de forma estricta cualquier fecha anterior a Hoy + 24 horas en los cuatro hitos cronologicos del torneo (RF-20).
+4. Guardar el torneo validado en SQLite.
+5. Mostrar una vista con todas las especificaciones del torneo creado.
+6. Implementar la edicion y actualizacion del torneo.
+7. Implementar el cierre de la vista y el regreso al listado mediante el back stack.
 
-**Entregable:** flujo de creacion, edicion y consulta de torneos (RF-06 a RF-09).
+**Entregable:** flujo de creacion, edicion y consulta de torneos (RF-06 a RF-09, RF-19, RF-20).
 
-**Verificacion del desarrollador:** crear un torneo valido, confirmar que aparece en el detalle y en el listado, intentar guardar fechas o campos invalidos, editarlo, cerrar la vista y verificar el regreso al catalogo.
+**Verificacion del desarrollador:** crear un torneo valido, confirmar que aparece en el detalle y en el listado, intentar guardar fechas o campos invalidos, comprobar que el desplegable de zona horaria solo ofrece opciones del pais seleccionado y se reinicia al cambiar de pais, confirmar que los campos de fecha de registro e inicio/fin de torneo solo se pueden completar mediante los selectores de calendario y reloj (sin teclado), verificar que las fechas anteriores a Hoy + 24 horas quedan deshabilitadas en el calendario y que el formulario rechaza su guardado, editarlo, cerrar la vista y verificar el regreso al catalogo.
 
-**Criterio de salida:** ningun torneo invalido se guarda, los datos creados y editados persisten al reiniciar la aplicacion y el flujo de cierre retorna a la pantalla de consulta.
+**Criterio de salida:** ningun torneo invalido se guarda, los datos creados y editados persisten al reiniciar la aplicacion, los cuatro campos de fecha del torneo solo aceptan valores provenientes de los DateTime Pickers y nunca una fecha anterior a Hoy + 24 horas, y el flujo de cierre retorna a la pantalla de consulta.
 
 ### Fase 7 - Pruebas y entrega Android
 
-1. Probar los flujos MVP RF-01 a RF-10, RF-13, RF-14 y RF-18 en Android.
+1. Probar los flujos MVP RF-01 a RF-10, RF-13, RF-14, RF-18, RF-19 y RF-20 en Android.
 2. Verificar persistencia despues de cerrar y volver a abrir la aplicacion.
-3. Probar validaciones con datos vacios, fechas invalidas y contrasenas inseguras.
+3. Probar validaciones con datos vacios, fechas invalidas, fechas anteriores a Hoy + 24 horas e intentos de entrada manual de texto en los DateTime Pickers, y contrasenas inseguras.
 4. Verificar busqueda y filtros combinados.
 5. Comprobar que el uso principal funcione con conexión a internet.
 6. Generar el paquete Android y documentar la instalacion.
@@ -191,7 +193,7 @@ Si las rutas o menus cambian entre versiones de Android Studio, usar **SDK Manag
 
 ### Fase 11 - Validacion integral y entrega final
 
-1. Ejecutar pruebas de aceptacion para RF-01 a RF-18 y RNF-01 a RNF-06.
+1. Ejecutar pruebas de aceptacion para RF-01 a RF-20 y RNF-01 a RNF-06.
 2. Verificar flujos online y documentar dependencias que requieran conexión a internet.
 3. Revisar todas las pantallas contra `UI_AppTorneos.pdf` y probar navegacion contextual.
 4. Generar y validar el paquete Android final.
@@ -242,11 +244,13 @@ El modelo se incorporara por fases; las tablas no necesarias para el MVP pueden 
 
 ## 6. Criterios de aceptacion
 
-- Cada requisito RF-01 a RF-18 debe estar asociado a una fase, una pantalla o servicio responsable y una prueba de aceptacion antes de marcarse como completado.
+- Cada requisito RF-01 a RF-20 debe estar asociado a una fase, una pantalla o servicio responsable y una prueba de aceptacion antes de marcarse como completado.
 - El registro, inicio de sesion y cierre de sesion validan los datos y estados definidos; las contrasenas no se almacenan en texto plano.
 - Home y la navegacion permiten acceder a Torneos, Eventos y Perfil, y al volver de un detalle conservan la seccion de origen y su contexto.
 - La busqueda de torneos contempla nombre, juego y organizador; los filtros se limitan a estado, fecha y alcance.
 - La creacion, publicacion, edicion, cancelacion, cierre e inscripcion respetan fechas, cupos, requisitos, permisos y persistencia local.
+- En la creacion y edicion de torneos, pais, juego y zona horaria se seleccionan mediante menus desplegables y las zonas horarias ofrecidas corresponden exclusivamente al pais seleccionado (RF-19).
+- Los campos de inicio de registro, fin de registro, inicio del torneo y finalizacion del torneo se capturan unicamente mediante DateTime Pickers con calendario y reloj integrados, sin aceptar entrada manual de texto, y ninguna fecha anterior a Hoy + 24 horas puede seleccionarse ni guardarse en dichos campos (RF-20).
 - Los eventos muestran estados y calendario; las partidas, resultados, disputas y clasificaciones se actualizan de forma consistente.
 - El perfil presenta informacion, historial, estadisticas y ranking disponibles, y solo permite editar campos autorizados.
 - Los roles limitan las acciones permitidas; la administracion global y las acciones sensibles quedan registradas.
