@@ -1,5 +1,5 @@
 import { ChevronLeft } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,14 +8,18 @@ import { useAuth } from '../../auth/AuthProvider';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
+import { DateTimeField } from '../../components/ui/DateTimeField';
 import { FeedbackState } from '../../components/ui/FeedbackState';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { countryRepository, gameRepository, tournamentRepository } from '../../database/repositories';
 import { canManageTournament } from '../../tournaments/authorization';
+import { timezoneLabel, timezonesForCountryCode } from '../../tournaments/timezones';
 import {
   emptyTournamentForm,
+  minimumScheduleDateTime,
   parseLocalDateTime,
+  parseScheduleDate,
   validateTournamentForm,
 } from '../../tournaments/validation';
 import type { TournamentFormErrors, TournamentFormValues } from '../../tournaments/validation';
@@ -67,6 +71,49 @@ export function TournamentFormScreen({ route, navigation }: Props) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [existingStatus, setExistingStatus] = useState<string | null>(null);
+  const minScheduleDate = useMemo(() => minimumScheduleDateTime(), []);
+  // Registration (unlike the tournament's own start/end) may open the same
+  // day: its only floor is "not earlier than now".
+  const nowFloor = useMemo(() => new Date(), []);
+
+  // The tournament must last at least 1 day: the end date/time must be at
+  // least 24 hours after the start, on top of the RF-20 "Hoy + 24h" floor.
+  // Recompute whenever the start field changes so the end picker's
+  // calendar/clock cannot land on a shorter duration.
+  const endMinimumDate = useMemo(() => {
+    const startDate = parseScheduleDate(values.startAt);
+    if (!startDate) return minScheduleDate;
+    const oneDayAfterStart = new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+    return oneDayAfterStart > minScheduleDate ? oneDayAfterStart : minScheduleDate;
+  }, [values.startAt, minScheduleDate]);
+
+  // Registration must close at least 24 hours before the tournament starts
+  // (which also guarantees it never lands after the start). The start field
+  // is bounded below by "registration closes + 24h", and the registration
+  // closing field is bounded above by "start - 24h", so neither picker lets
+  // the user choose a combination the validator would reject afterwards.
+  const startMinimumDate = useMemo(() => {
+    const closesDate = parseScheduleDate(values.registrationClosesAt);
+    if (!closesDate) return minScheduleDate;
+    const oneDayAfterClose = new Date(closesDate.getTime() + 24 * 60 * 60 * 1000);
+    return oneDayAfterClose > minScheduleDate ? oneDayAfterClose : minScheduleDate;
+  }, [values.registrationClosesAt, minScheduleDate]);
+
+  const registrationClosesMaximumDate = useMemo(() => {
+    const startDate = parseScheduleDate(values.startAt);
+    if (!startDate) return undefined;
+    return new Date(startDate.getTime() - 24 * 60 * 60 * 1000);
+  }, [values.startAt]);
+
+  // Registration must stay open for at least 1 hour: the closing field's
+  // lower bound is "registration opens + 1h", falling back to "now" when
+  // no opening date has been chosen yet.
+  const registrationClosesMinimumDate = useMemo(() => {
+    const opensDate = parseScheduleDate(values.registrationOpensAt);
+    if (!opensDate) return nowFloor;
+    const oneHourAfterOpen = new Date(opensDate.getTime() + 60 * 60 * 1000);
+    return oneHourAfterOpen > nowFloor ? oneHourAfterOpen : nowFloor;
+  }, [values.registrationOpensAt, nowFloor]);
 
   useEffect(() => {
     let isCurrent = true;
@@ -126,8 +173,21 @@ export function TournamentFormScreen({ route, navigation }: Props) {
     setValues((prev) => ({ ...prev, [key]: value }));
   }
 
+  const selectedCountry = countries.find((country) => country.id === values.countryId);
+  const timezoneOptions = timezonesForCountryCode(selectedCountry?.code);
+
+  function handleCountryChange(countryId: number) {
+    const country = countries.find((item) => item.id === countryId);
+    const allowed = timezonesForCountryCode(country?.code);
+    setValues((prev) => ({
+      ...prev,
+      countryId,
+      timezone: allowed.includes(prev.timezone) ? prev.timezone : allowed.length === 1 ? allowed[0] : '',
+    }));
+  }
+
   function goNext() {
-    const validationErrors = validateTournamentForm(values);
+    const validationErrors = validateTournamentForm(values, timezoneOptions);
     const fieldsByStep: (keyof TournamentFormValues)[][] = [
       ['name'],
       ['gameId', 'countryId', 'timezone'],
@@ -155,7 +215,7 @@ export function TournamentFormScreen({ route, navigation }: Props) {
   }
 
   async function handleSave(status: 'draft' | 'published' | 'keep') {
-    const validationErrors = validateTournamentForm(values);
+    const validationErrors = validateTournamentForm(values, timezoneOptions);
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
       setStep(0);
@@ -286,18 +346,17 @@ export function TournamentFormScreen({ route, navigation }: Props) {
             <Select
               error={errors.countryId}
               label="Country"
-              onChange={(value) => update('countryId', value)}
+              onChange={handleCountryChange}
               options={countries.map((country) => ({ label: country.name, value: country.id }))}
               placeholder="Select a country"
               value={values.countryId}
             />
-            <Input
-              autoCapitalize="none"
+            <Select
               error={errors.timezone}
-              hint="Use a UTC offset name, e.g. UTC or America/Bogota."
               label="Timezone"
-              onChangeText={(text) => update('timezone', text)}
-              placeholder="UTC"
+              onChange={(value) => update('timezone', value)}
+              options={timezoneOptions.map((timezone) => ({ label: timezoneLabel(timezone), value: timezone }))}
+              placeholder={selectedCountry ? 'Select a timezone' : 'Select a country first'}
               value={values.timezone}
             />
           </Card>
@@ -305,37 +364,38 @@ export function TournamentFormScreen({ route, navigation }: Props) {
 
         {step === 2 ? (
           <Card className="gap-4 p-5">
-            <Input
-              error={errors.startAt}
-              hint="YYYY-MM-DD HH:MM"
-              label="Start date and time"
-              onChangeText={(text) => update('startAt', text)}
-              placeholder="2026-01-01 18:00"
-              value={values.startAt}
-            />
-            <Input
-              error={errors.endAt}
-              hint="Optional. YYYY-MM-DD HH:MM"
-              label="End date and time"
-              onChangeText={(text) => update('endAt', text)}
-              placeholder="2026-01-02 20:00"
-              value={values.endAt}
-            />
-            <Input
+            <DateTimeField
               error={errors.registrationOpensAt}
-              hint="Optional. YYYY-MM-DD HH:MM"
+              hint="The tournament can start today, but not earlier than the current time."
               label="Registration opens"
-              onChangeText={(text) => update('registrationOpensAt', text)}
-              placeholder="2025-12-20 09:00"
+              minimumDate={nowFloor}
+              onChange={(value) => update('registrationOpensAt', value)}
               value={values.registrationOpensAt}
             />
-            <Input
+            <DateTimeField
               error={errors.registrationClosesAt}
-              hint="Optional. YYYY-MM-DD HH:MM"
+              hint="The registration must last at least 1 hour."
               label="Registration closes"
-              onChangeText={(text) => update('registrationClosesAt', text)}
-              placeholder="2025-12-31 23:59"
+              maximumDate={registrationClosesMaximumDate}
+              minimumDate={registrationClosesMinimumDate}
+              onChange={(value) => update('registrationClosesAt', value)}
               value={values.registrationClosesAt}
+            />
+            <DateTimeField
+              error={errors.startAt}
+              hint="The tournament must start at least 24 hours after registration closes."
+              label="Start date and time"
+              minimumDate={startMinimumDate}
+              onChange={(value) => update('startAt', value)}
+              value={values.startAt}
+            />
+            <DateTimeField
+              error={errors.endAt}
+              hint="The tournament must last at least 24 hours."
+              label="End date and time"
+              minimumDate={endMinimumDate}
+              onChange={(value) => update('endAt', value)}
+              value={values.endAt}
             />
           </Card>
         ) : null}

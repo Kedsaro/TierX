@@ -24,12 +24,14 @@ La plataforma incorpora un sistema de ranking que clasifica a los jugadores regi
 - **RF-16 — Roles y permisos:** El sistema deberá diferenciar como mínimo los roles **Usuario**, **Organizador** y **Administrador**, y mostrar únicamente las acciones autorizadas para cada rol.
 - **RF-17 — Administración global:** El administrador deberá poder gestionar usuarios, roles, juegos, países, reglas, torneos reportados, reportes, parámetros globales y auditoría.
 - **RF-18 — Navegación contextual:** Desde Home, Torneos, Eventos y Perfil, el usuario podrá abrir el detalle de un torneo y volver a la sección de origen conservando filtros, posición y contexto.
+- **RF-19 — Zona horaria dependiente del país:** En el módulo de creación y edición de torneos, la selección de país, juego y zona horaria se realizará mediante menús desplegables. Las opciones del desplegable de zona horaria deberán filtrarse dinámicamente según el país seleccionado, mostrando únicamente las zonas horarias válidas para ese país. Si el país cambia y la zona horaria elegida ya no es válida, el sistema deberá limpiar la selección y solicitar una nueva.
+- **RF-20 — Selectores de fecha y hora en la programación de torneos:** En el paso de fechas del formulario de creación y edición de torneos, los campos **Inicio de registro**, **Fin de registro**, **Inicio del torneo** y **Finalización del torneo** deberán capturarse exclusivamente mediante componentes de tipo DateTime Picker con interfaz de calendario (selección de día/mes/año) y de reloj (selección de hora/minutos) integrados, quedando bloqueada la entrada manual de texto en dichos campos. El sistema deberá deshabilitar y bloquear de forma estricta, tanto en la interfaz del calendario como en la validación lógica previa al guardado, cualquier fecha y hora anterior al momento actual más 24 horas (Hoy + 1 día), de modo que el inicio de registro, el fin de registro, el inicio del torneo y la finalización del torneo queden obligatoriamente planificados en tiempos futuros con hora y minutos específicos. Adicionalmente se deberá mantener la coherencia cronológica entre los cuatro hitos (el fin de registro no puede ser anterior al inicio de registro ni posterior al inicio del torneo, y la finalización del torneo no puede ser anterior a su inicio).
 
 ## 3. Requerimientos No Funcionales
 - **RNF-01 — Aplicación móvil nativa:** Desarrollada exclusivamente para la plataforma Android mediante empaquetado compatible.
 - **RNF-02 — Persistencia y Seguridad:** Toda la información de los torneos, usuarios y contraseñas se almacenará de forma segura. Las contraseñas se almacenarán como hashes usando Argon2id, y los datos de sesión se gestionarán de forma segura. La aplicación requiere conexión a internet para todas sus funcionalidades.
 - **RNF-03 — Usabilidad Móvil:** La interfaz estará diseñada con patrones móviles (gestos, listas verticales, inputs nativos) organizando claramente el registro, búsquedas y flujos de creación.
-- **RNF-04 — Validación de datos:** El sistema validará que los campos obligatorios (fechas válidas, nombres no vacíos, contraseñas seguras) se cumplan antes de realizar escrituras en la base de datos.
+- **RNF-04 — Validación de datos:** El sistema validará que los campos obligatorios (fechas válidas, nombres no vacíos, contraseñas seguras) se cumplan antes de realizar escrituras en la base de datos. En particular, los hitos cronológicos de un torneo (inicio/fin de registro e inicio/fin del torneo) deberán rechazarse si corresponden a un instante anterior a Hoy + 24 horas (ver RF-20).
 - **RNF-05 — Idioma de la aplicación:** Toda la interfaz, navegación, mensajes y contenido estático de la aplicación se presentará en inglés.
 - **RNF-06 — Conectividad:** La aplicación requiere conexión a internet activa para todas sus funcionalidades, incluyendo registro, inicio de sesión y todas las operaciones de torneos.
 
@@ -92,11 +94,12 @@ Implementa la pestaña **Torneos** para explorar competencias y administrar las 
 **User Journey C2 — Crear y publicar un torneo:**
 1. Desde **Home**, el usuario selecciona **Crear torneo**.
 2. El sistema abre el formulario por pasos: información general, juego y ubicación, fechas, formato y cupos, reglas y requisitos, premios y visibilidad.
-3. El usuario completa los datos y puede guardar un borrador.
-4. El sistema valida campos obligatorios, fechas, cupos y coherencia del formato.
-5. El usuario revisa la vista previa y puede seleccionar entre **Publicar** y **Editar**
-6. Si el usuario selecciona el boton **Editar** el sistema abre nuevamente el formulario 
-7. Si el usuario selecciona el boton **Publicar** el sistema crea el torneo, muestra su detalle y lo agrega al listado y a la actividad del usuario.
+3. En el paso de fechas, el usuario define inicio de registro, fin de registro, inicio del torneo y finalización del torneo mediante selectores de calendario y reloj (DateTime Pickers); el sistema impide escribir la fecha manualmente y bloquea cualquier selección anterior a Hoy + 24 horas.
+4. El usuario completa los datos y puede guardar un borrador.
+5. El sistema valida campos obligatorios, fechas, cupos y coherencia del formato.
+6. El usuario revisa la vista previa y puede seleccionar entre **Publicar** y **Editar**
+7. Si el usuario selecciona el boton **Editar** el sistema abre nuevamente el formulario 
+8. Si el usuario selecciona el boton **Publicar** el sistema crea el torneo, muestra su detalle y lo agrega al listado y a la actividad del usuario.
 
 **User Journey C3 — Inscribirse:**
 1. Desde **Home**, el usuario selecciona una de las tarjetas visibles dentro del feed vertical compuesto exclusivamente por cuatro colecciones horizontales: Can interest you, Near you, Competitive y Others, el cual es modificado gracias a la busqueda y filtros ingresados.

@@ -6,6 +6,8 @@ import {
   Pencil,
   ShieldCheck,
   Trophy,
+  UserMinus,
+  UserPlus,
   Users,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
@@ -18,10 +20,15 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { FeedbackState } from '../../components/ui/FeedbackState';
-import { tournamentRepository } from '../../database/repositories';
+import { Modal } from '../../components/ui/Modal';
+import { registrationRepository, tournamentRepository } from '../../database/repositories';
+import { useCurrentPlayer } from '../../hooks/useCurrentPlayer';
 import type { TournamentDetailParams } from '../../navigation/tournaments/types';
 import { availableActions, canManageTournament, nextStatusFor } from '../../tournaments/authorization';
 import type { TournamentAction } from '../../tournaments/authorization';
+import { evaluateRegistrationEligibility } from '../../tournaments/registrationEligibility';
+import { ACTIVE_REGISTRATION_STATUSES } from '../../types/registration';
+import type { Registration, RegistrationStatus } from '../../types/registration';
 import type { Tournament, TournamentDetails } from '../../types/tournament';
 
 type TournamentDetailScreenProps = NativeStackScreenProps<TournamentDetailParams, 'TournamentDetail'>;
@@ -75,16 +82,31 @@ const actionConfirmations: Partial<Record<TournamentAction, string>> = {
   close: 'This will mark the tournament as completed. Are you sure?',
 };
 
+const registrationStatusLabels: Record<RegistrationStatus, string> = {
+  pending: 'Your registration is pending',
+  registered: "You're registered for this tournament",
+  waitlisted: "You're on the waitlist",
+  cancelled: 'Your registration was cancelled',
+  rejected: 'Your registration was rejected',
+};
+
 export function TournamentDetailScreen({ route, navigation }: TournamentDetailScreenProps) {
   const { tournamentId } = route.params;
   const onClose = () => navigation.goBack();
   const db = useSQLiteContext();
   const { user } = useAuth();
+  const { player } = useCurrentPlayer();
   const [tournament, setTournament] = useState<TournamentDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<TournamentAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const [registration, setRegistration] = useState<Registration | null>(null);
+  const [isRegistrationLoading, setIsRegistrationLoading] = useState(true);
+  const [isRegistrationModalVisible, setIsRegistrationModalVisible] = useState(false);
+  const [isSubmittingRegistration, setIsSubmittingRegistration] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
 
   const loadTournament = useCallback(() => {
     let isCurrent = true;
@@ -110,6 +132,33 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
   }, [db, tournamentId]);
 
   useEffect(() => loadTournament(), [loadTournament]);
+
+  // RF-10: tracks the signed-in player's own registration (if any) for this
+  // tournament, independently from the tournament details above, so it can
+  // be refreshed on its own after registering or cancelling.
+  const loadRegistration = useCallback(() => {
+    let isCurrent = true;
+    const fetchRegistration = player
+      ? registrationRepository.getForPlayer(db, tournamentId, player.id)
+      : Promise.resolve(null);
+    fetchRegistration.then(
+      (result) => {
+        if (!isCurrent) return;
+        setRegistration(result);
+        setIsRegistrationLoading(false);
+      },
+      () => {
+        if (!isCurrent) return;
+        setRegistration(null);
+        setIsRegistrationLoading(false);
+      },
+    );
+    return () => {
+      isCurrent = false;
+    };
+  }, [db, tournamentId, player]);
+
+  useEffect(() => loadRegistration(), [loadRegistration]);
 
   async function runAction(action: TournamentAction) {
     if (!tournament) return;
@@ -138,6 +187,51 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
       setPendingAction(null);
     }
   }
+
+  async function handleRegister() {
+    if (!player) return;
+    setIsSubmittingRegistration(true);
+    setRegistrationError(null);
+    try {
+      await registrationRepository.register(db, tournamentId, player.id);
+      setIsRegistrationModalVisible(false);
+      loadTournament();
+      loadRegistration();
+    } catch (cause) {
+      setRegistrationError(cause instanceof Error ? cause.message : 'Could not complete your registration.');
+    } finally {
+      setIsSubmittingRegistration(false);
+    }
+  }
+
+  async function handleCancelRegistration() {
+    if (!player) return;
+    const proceed = await new Promise<boolean>((resolve) => {
+      Alert.alert('Cancel registration', 'You will lose your spot in this tournament. Are you sure?', [
+        { text: 'Keep my spot', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Cancel registration', style: 'destructive', onPress: () => resolve(true) },
+      ]);
+    });
+    if (!proceed) return;
+
+    setIsSubmittingRegistration(true);
+    setRegistrationError(null);
+    try {
+      await registrationRepository.cancel(db, tournamentId, player.id);
+      loadTournament();
+      loadRegistration();
+    } catch (cause) {
+      setRegistrationError(cause instanceof Error ? cause.message : 'Could not cancel your registration.');
+    } finally {
+      setIsSubmittingRegistration(false);
+    }
+  }
+
+  const isOrganizer = tournament ? canManageTournament(tournament, user?.id) : false;
+  const hasActiveRegistration = registration !== null && ACTIVE_REGISTRATION_STATUSES.includes(registration.status);
+  const eligibility = tournament
+    ? evaluateRegistrationEligibility(tournament, tournament.participant_count, user?.id)
+    : { canRegister: false };
 
   return (
     <SafeAreaView className="flex-1 bg-[#f4f6f2]" edges={['top', 'bottom']}>
@@ -229,7 +323,7 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
           {tournament.rules ? <TextSection title="Rules" content={tournament.rules} /> : null}
           {tournament.prizes ? <TextSection title="Prizes" content={tournament.prizes} /> : null}
 
-          {canManageTournament(tournament, user?.id) && availableActions(tournament.status).length > 0 ? (
+          {isOrganizer && availableActions(tournament.status).length > 0 ? (
             <View className="mt-5">
               <Text className="mb-2 text-sm font-bold uppercase tracking-wide text-[#65736c]">Manage</Text>
               {actionError ? (
@@ -262,8 +356,87 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
               </View>
             </View>
           ) : null}
+
+          {!isOrganizer && !isRegistrationLoading ? (
+            <View className="mt-5">
+              <Text className="mb-2 text-sm font-bold uppercase tracking-wide text-[#65736c]">Participation</Text>
+              {registrationError ? (
+                <View accessibilityRole="alert" className="mb-3 rounded-lg border border-[#efc5c1] bg-[#f9e4e2] p-3">
+                  <Text className="text-sm leading-5 text-[#872822]">{registrationError}</Text>
+                </View>
+              ) : null}
+              {hasActiveRegistration && registration ? (
+                <View className="gap-3">
+                  <Badge
+                    label={registrationStatusLabels[registration.status]}
+                    tone={registration.status === 'waitlisted' ? 'warning' : 'success'}
+                  />
+                  <Button
+                    icon={<UserMinus color="#ffffff" size={16} />}
+                    loading={isSubmittingRegistration}
+                    onPress={() => void handleCancelRegistration()}
+                    variant="danger"
+                  >
+                    Cancel registration
+                  </Button>
+                </View>
+              ) : (
+                <View className="gap-2">
+                  <Button
+                    disabled={!eligibility.canRegister}
+                    icon={<UserPlus color="#ffffff" size={16} />}
+                    loading={isSubmittingRegistration}
+                    onPress={() => setIsRegistrationModalVisible(true)}
+                  >
+                    Register
+                  </Button>
+                  {!eligibility.canRegister && eligibility.reason ? (
+                    <Text className="text-xs text-[#65736c]">{eligibility.reason}</Text>
+                  ) : null}
+                </View>
+              )}
+            </View>
+          ) : null}
         </ScrollView>
       )}
+
+      {tournament ? (
+        <Modal
+          footer={(
+            <View className="flex-row gap-3">
+              <View className="flex-1">
+                <Button onPress={() => setIsRegistrationModalVisible(false)} variant="quiet">
+                  Cancel
+                </Button>
+              </View>
+              <View className="flex-1">
+                <Button loading={isSubmittingRegistration} onPress={() => void handleRegister()}>
+                  Confirm
+                </Button>
+              </View>
+            </View>
+          )}
+          onClose={() => setIsRegistrationModalVisible(false)}
+          title="Confirm registration"
+          visible={isRegistrationModalVisible}
+        >
+          <View className="gap-3">
+            <Text className="text-sm leading-5 text-[#4d5d55]">
+              You are about to register for <Text className="font-bold text-[#17231f]">{tournament.name}</Text>.
+            </Text>
+            <Text className="text-sm text-[#4d5d55]">
+              {tournament.participant_count} / {tournament.capacity} spots taken.
+            </Text>
+            {tournament.requirements ? (
+              <View className="rounded-lg border border-[#dfe7e1] bg-white p-3">
+                <Text className="mb-1 text-xs font-bold uppercase tracking-wide text-[#65736c]">Requirements</Text>
+                <Text className="text-sm leading-5 text-[#4d5d55]">{tournament.requirements}</Text>
+              </View>
+            ) : null}
+            <Text className="text-xs text-[#65736c]">By confirming, you declare that you meet the requirements above.</Text>
+          </View>
+        </Modal>
+      ) : null}
     </SafeAreaView>
   );
 }

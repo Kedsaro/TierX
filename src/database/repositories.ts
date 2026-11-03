@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import type { Country, Game } from '../types/catalog';
 import type { CreatePlayerInput, Player, Ranking, RankingWithPlayer } from '../types/player';
+import type { Registration } from '../types/registration';
 import type {
   CreateTournamentInput,
   Tournament,
@@ -368,6 +369,55 @@ export const rankingRepository = {
 
   async delete(db: SQLiteDatabase, id: number): Promise<void> {
     await db.runAsync('DELETE FROM rankings WHERE id = ?', id);
+  },
+};
+
+export const registrationRepository = {
+  /** Any existing registration row for this player/tournament pair, regardless of status (including cancelled). */
+  getForPlayer(db: SQLiteDatabase, tournamentId: number, playerId: number): Promise<Registration | null> {
+    return db.getFirstAsync<Registration>(
+      'SELECT * FROM registrations WHERE tournament_id = ? AND player_id = ?',
+      tournamentId,
+      playerId,
+    );
+  },
+
+  /** Count of registrations that occupy a capacity slot (pending, registered or waitlisted). */
+  async countActive(db: SQLiteDatabase, tournamentId: number): Promise<number> {
+    const row = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM registrations
+       WHERE tournament_id = ? AND status IN ('pending', 'registered', 'waitlisted')`,
+      tournamentId,
+    );
+    return row?.count ?? 0;
+  },
+
+  /**
+   * Registers (or re-registers, if a previous row was cancelled/rejected) a
+   * player for a tournament. `tournament_id` + `player_id` is unique, so a
+   * second registration reactivates the existing row instead of failing.
+   */
+  async register(db: SQLiteDatabase, tournamentId: number, playerId: number): Promise<void> {
+    await db.runAsync(
+      `INSERT INTO registrations (tournament_id, player_id, status, registered_at)
+       VALUES (?, ?, 'registered', CURRENT_TIMESTAMP)
+       ON CONFLICT(tournament_id, player_id) DO UPDATE SET status = 'registered', registered_at = CURRENT_TIMESTAMP`,
+      tournamentId,
+      playerId,
+    );
+  },
+
+  /** Cancels a player's registration, keeping the row (and its history) instead of deleting it. */
+  async cancel(db: SQLiteDatabase, tournamentId: number, playerId: number): Promise<void> {
+    await db.runAsync(
+      "UPDATE registrations SET status = 'cancelled' WHERE tournament_id = ? AND player_id = ?",
+      tournamentId,
+      playerId,
+    );
+  },
+
+  async delete(db: SQLiteDatabase, id: number): Promise<void> {
+    await db.runAsync('DELETE FROM registrations WHERE id = ?', id);
   },
 };
 
