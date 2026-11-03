@@ -1,7 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { CalendarDays, House, Trophy, UserRound } from 'lucide-react-native';
-import { EventsScreen } from '../screens/EventsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { EventsStack } from './EventsStack';
 import { HomeStack } from './HomeStack';
 import { TournamentsStack } from './TournamentsStack';
 
@@ -46,7 +46,7 @@ export function RootNavigator() {
     >
       <Tab.Screen name="Home" component={HomeStack} />
       <Tab.Screen name="Tournaments" component={TournamentsStack} />
-      <Tab.Screen name="Events" component={EventsScreen} />
+      <Tab.Screen name="Events" component={EventsStack} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );

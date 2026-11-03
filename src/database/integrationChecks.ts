@@ -6,11 +6,12 @@ import {
   tournamentRepository,
   userRepository,
 } from './repositories';
+import { DATABASE_VERSION } from './schema';
 
 export async function runDatabaseIntegrationChecks(db: SQLiteDatabase): Promise<void> {
   const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-  if (version?.user_version !== 4) {
-    throw new Error(`Expected database version 4, found ${version?.user_version ?? 0}.`);
+  if (version?.user_version !== DATABASE_VERSION) {
+    throw new Error(`Expected database version ${DATABASE_VERSION}, found ${version?.user_version ?? 0}.`);
   }
 
   const requiredTables = [

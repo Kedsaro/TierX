@@ -1,10 +1,12 @@
 import {
   CalendarClock,
+  CalendarPlus,
   ChevronLeft,
   Globe2,
   MapPin,
   Pencil,
   ShieldCheck,
+  Swords,
   Trophy,
   UserMinus,
   UserPlus,
@@ -19,14 +21,18 @@ import { useAuth } from '../../auth/AuthProvider';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
+import { DateTimeField } from '../../components/ui/DateTimeField';
 import { FeedbackState } from '../../components/ui/FeedbackState';
+import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
-import { registrationRepository, tournamentRepository } from '../../database/repositories';
+import { eventRepository, registrationRepository, tournamentRepository } from '../../database/repositories';
 import { useCurrentPlayer } from '../../hooks/useCurrentPlayer';
 import type { TournamentDetailParams } from '../../navigation/tournaments/types';
 import { availableActions, canManageTournament, nextStatusFor } from '../../tournaments/authorization';
 import type { TournamentAction } from '../../tournaments/authorization';
 import { evaluateRegistrationEligibility } from '../../tournaments/registrationEligibility';
+import { minimumScheduleDateTime, parseLocalDateTime } from '../../tournaments/validation';
+import type { TournamentEvent, TournamentEventStatus } from '../../types/event';
 import { ACTIVE_REGISTRATION_STATUSES } from '../../types/registration';
 import type { Registration, RegistrationStatus } from '../../types/registration';
 import type { Tournament, TournamentDetails } from '../../types/tournament';
@@ -90,6 +96,20 @@ const registrationStatusLabels: Record<RegistrationStatus, string> = {
   rejected: 'Your registration was rejected',
 };
 
+const eventStatusLabels: Record<TournamentEventStatus, string> = {
+  upcoming: 'Upcoming',
+  active: 'Active',
+  completed: 'Finished',
+  cancelled: 'Cancelled',
+};
+
+const eventStatusTones: Record<TournamentEventStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
+  upcoming: 'neutral',
+  active: 'warning',
+  completed: 'success',
+  cancelled: 'danger',
+};
+
 export function TournamentDetailScreen({ route, navigation }: TournamentDetailScreenProps) {
   const { tournamentId } = route.params;
   const onClose = () => navigation.goBack();
@@ -107,6 +127,24 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
   const [isRegistrationModalVisible, setIsRegistrationModalVisible] = useState(false);
   const [isSubmittingRegistration, setIsSubmittingRegistration] = useState(false);
   const [registrationError, setRegistrationError] = useState<string | null>(null);
+
+  const [events, setEvents] = useState<TournamentEvent[]>([]);
+  const [isCreateEventModalVisible, setIsCreateEventModalVisible] = useState(false);
+  const [newEventName, setNewEventName] = useState('');
+  const [newEventStartsAt, setNewEventStartsAt] = useState('');
+  const [newEventEndsAt, setNewEventEndsAt] = useState('');
+  const [newEventStreamUrl, setNewEventStreamUrl] = useState('');
+  const [createEventError, setCreateEventError] = useState<string | null>(null);
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+
+  const loadEvents = useCallback(() => {
+    eventRepository.listByTournament(db, tournamentId).then(
+      (rows) => setEvents(rows),
+      () => setEvents([]),
+    );
+  }, [db, tournamentId]);
+
+  useEffect(() => loadEvents(), [loadEvents]);
 
   const loadTournament = useCallback(() => {
     let isCurrent = true;
@@ -227,11 +265,60 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
     }
   }
 
+  function openCreateEventModal() {
+    setNewEventName('');
+    setNewEventStartsAt('');
+    setNewEventEndsAt('');
+    setNewEventStreamUrl('');
+    setCreateEventError(null);
+    setIsCreateEventModalVisible(true);
+  }
+
+  async function handleCreateEvent() {
+    if (!newEventName.trim()) {
+      setCreateEventError('Enter a name for this event.');
+      return;
+    }
+    const startsAtIso = parseLocalDateTime(newEventStartsAt);
+    if (!startsAtIso) {
+      setCreateEventError('Select a valid start date and time.');
+      return;
+    }
+    const endsAtIso = newEventEndsAt.trim() ? parseLocalDateTime(newEventEndsAt) : null;
+    if (newEventEndsAt.trim() && !endsAtIso) {
+      setCreateEventError('Select a valid end date and time.');
+      return;
+    }
+    if (endsAtIso && endsAtIso < startsAtIso) {
+      setCreateEventError('The end date must be on or after the start date.');
+      return;
+    }
+
+    setIsCreatingEvent(true);
+    setCreateEventError(null);
+    try {
+      await eventRepository.create(db, {
+        tournament_id: tournamentId,
+        name: newEventName.trim(),
+        starts_at: startsAtIso,
+        ends_at: endsAtIso,
+        stream_url: newEventStreamUrl.trim() || null,
+      });
+      setIsCreateEventModalVisible(false);
+      loadEvents();
+    } catch (cause) {
+      setCreateEventError(cause instanceof Error ? cause.message : 'Could not schedule this event.');
+    } finally {
+      setIsCreatingEvent(false);
+    }
+  }
+
   const isOrganizer = tournament ? canManageTournament(tournament, user?.id) : false;
   const hasActiveRegistration = registration !== null && ACTIVE_REGISTRATION_STATUSES.includes(registration.status);
   const eligibility = tournament
     ? evaluateRegistrationEligibility(tournament, tournament.participant_count, user?.id)
     : { canRegister: false };
+  const minScheduleDate = minimumScheduleDateTime();
 
   return (
     <SafeAreaView className="flex-1 bg-[#f4f6f2]" edges={['top', 'bottom']}>
@@ -317,13 +404,45 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
             ) : null}
           </Card>
 
+          <View className="mb-2 mt-5 flex-row items-center justify-between">
+            <Text className="text-sm font-bold uppercase tracking-wide text-[#65736c]">Events</Text>
+            {isOrganizer ? (
+              <Pressable accessibilityLabel="Schedule event" accessibilityRole="button" hitSlop={8} onPress={openCreateEventModal}>
+                <CalendarPlus color="#176b5b" size={20} />
+              </Pressable>
+            ) : null}
+          </View>
+          {events.length === 0 ? (
+            <Card className="p-4">
+              <Text className="text-sm text-[#65736c]">
+                {isOrganizer ? 'Schedule an event to let participants know when to tune in or show up.' : 'No events have been scheduled for this tournament yet.'}
+              </Text>
+            </Card>
+          ) : (
+            <View className="gap-2">
+              {events.map((item) => (
+                <Card
+                  className="flex-row items-center justify-between gap-2 p-4"
+                  key={item.id}
+                  onPress={() => navigation.navigate('EventDetail', { eventId: item.id })}
+                >
+                  <View className="min-w-0 flex-1">
+                    <Text className="text-sm font-bold text-[#17231f]" numberOfLines={1}>{item.name}</Text>
+                    <Text className="text-xs text-[#65736c]">{formatDateTime(item.starts_at, tournament.timezone)}</Text>
+                  </View>
+                  <Badge label={eventStatusLabels[item.status]} tone={eventStatusTones[item.status]} />
+                </Card>
+              ))}
+            </View>
+          )}
+
           {tournament.requirements ? (
             <TextSection title="Requirements" content={tournament.requirements} />
           ) : null}
           {tournament.rules ? <TextSection title="Rules" content={tournament.rules} /> : null}
           {tournament.prizes ? <TextSection title="Prizes" content={tournament.prizes} /> : null}
 
-          {isOrganizer && availableActions(tournament.status).length > 0 ? (
+          {isOrganizer ? (
             <View className="mt-5">
               <Text className="mb-2 text-sm font-bold uppercase tracking-wide text-[#65736c]">Manage</Text>
               {actionError ? (
@@ -353,6 +472,13 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                       {actionLabels[action]}
                     </Button>
                   ))}
+                <Button
+                  icon={<Swords color="#176b5b" size={16} />}
+                  onPress={() => navigation.navigate('Bracket', { tournamentId: tournament.id })}
+                  variant="secondary"
+                >
+                  Manage bracket
+                </Button>
               </View>
             </View>
           ) : null}
@@ -437,6 +563,47 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
           </View>
         </Modal>
       ) : null}
+
+      <Modal
+        footer={(
+          <View className="flex-row gap-3">
+            <View className="flex-1">
+              <Button onPress={() => setIsCreateEventModalVisible(false)} variant="quiet">Cancel</Button>
+            </View>
+            <View className="flex-1">
+              <Button loading={isCreatingEvent} onPress={() => void handleCreateEvent()}>Schedule</Button>
+            </View>
+          </View>
+        )}
+        onClose={() => setIsCreateEventModalVisible(false)}
+        title="Schedule event"
+        visible={isCreateEventModalVisible}
+      >
+        <View className="gap-4">
+          <Input label="Name" onChangeText={setNewEventName} placeholder="e.g. Grand Finals Broadcast" value={newEventName} />
+          <DateTimeField
+            label="Starts"
+            minimumDate={minScheduleDate}
+            onChange={setNewEventStartsAt}
+            value={newEventStartsAt}
+          />
+          <DateTimeField
+            hint="Optional."
+            label="Ends"
+            minimumDate={minScheduleDate}
+            onChange={setNewEventEndsAt}
+            value={newEventEndsAt}
+          />
+          <Input
+            autoCapitalize="none"
+            label="Channel / link (optional)"
+            onChangeText={setNewEventStreamUrl}
+            placeholder="https://..."
+            value={newEventStreamUrl}
+          />
+          {createEventError ? <Text accessibilityRole="alert" className="text-sm text-[#a93232]">{createEventError}</Text> : null}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

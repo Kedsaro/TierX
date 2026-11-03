@@ -1,5 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { TournamentsScreen } from '../screens/TournamentsScreen';
+import { BracketScreen } from '../screens/events/BracketScreen';
+import { EventDetailScreen } from '../screens/events/EventDetailScreen';
 import { TournamentDetailScreen } from '../screens/tournaments/TournamentDetailScreen';
 import { TournamentFormScreen } from '../screens/tournaments/TournamentFormScreen';
 import type { TournamentsStackParamList } from './tournaments/types';
@@ -23,6 +25,8 @@ export function TournamentsStack() {
       <Stack.Screen name="TournamentsMain" component={TournamentsScreen} />
       <Stack.Screen name="TournamentDetail" component={TournamentDetailScreen} />
       <Stack.Screen name="TournamentForm" component={TournamentFormScreen} />
+      <Stack.Screen name="EventDetail" component={EventDetailScreen} />
+      <Stack.Screen name="Bracket" component={BracketScreen} />
     </Stack.Navigator>
   );
 }
