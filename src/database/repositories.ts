@@ -2,7 +2,8 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import type { Country, Game } from '../types/catalog';
 import type { CreateEventInput, EventSummary, TournamentEvent, TournamentEventStatus } from '../types/event';
 import type { CreateMatchInput, CreateStageInput, Match, MatchDetails, MatchStatus, Stage } from '../types/match';
-import type { CreatePlayerInput, Player, Ranking, RankingWithPlayer } from '../types/player';
+import type { CreatePlayerInput, Player, Ranking, RankingWithPlayer, UpdatePlayerInput } from '../types/player';
+import type { MatchHistoryItem, PlayerRankSummary, ProfileStats, UserPreferences } from '../types/profile';
 import type { Registration } from '../types/registration';
 import type {
   CreateTournamentInput,
@@ -112,9 +113,11 @@ export const countryRepository = {
 export const playerRepository = {
   create(db: SQLiteDatabase, input: CreatePlayerInput): Promise<number> {
     return db.runAsync(
-      'INSERT INTO players (display_name, user_id, country_id, favorite_game_id) VALUES (?, ?, ?, ?)',
+      'INSERT INTO players (display_name, user_id, avatar_uri, bio, country_id, favorite_game_id) VALUES (?, ?, ?, ?, ?, ?)',
       input.display_name.trim(),
       input.user_id ?? null,
+      input.avatar_uri ?? null,
+      input.bio ?? null,
       input.country_id ?? null,
       input.favorite_game_id ?? null,
     ).then((result) => result.lastInsertRowId);
@@ -147,16 +150,153 @@ export const playerRepository = {
     return db.getAllAsync<Player>('SELECT * FROM players ORDER BY display_name COLLATE NOCASE');
   },
 
-  async update(db: SQLiteDatabase, id: number, displayName: string): Promise<void> {
+  /** Applies the editable player-profile fields (RF-14); only the provided keys change. */
+  async update(db: SQLiteDatabase, id: number, changes: UpdatePlayerInput): Promise<void> {
+    const assignments: string[] = [];
+    const values: (string | number | null)[] = [];
+
+    if (changes.display_name !== undefined) {
+      assignments.push('display_name = ?');
+      values.push(changes.display_name.trim());
+    }
+    if (changes.avatar_uri !== undefined) {
+      assignments.push('avatar_uri = ?');
+      values.push(changes.avatar_uri?.trim() || null);
+    }
+    if (changes.bio !== undefined) {
+      assignments.push('bio = ?');
+      values.push(changes.bio?.trim() || null);
+    }
+    if (changes.country_id !== undefined) {
+      assignments.push('country_id = ?');
+      values.push(changes.country_id);
+    }
+    if (changes.favorite_game_id !== undefined) {
+      assignments.push('favorite_game_id = ?');
+      values.push(changes.favorite_game_id);
+    }
+    if (assignments.length === 0) return;
+
+    values.push(id);
     await db.runAsync(
-      'UPDATE players SET display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      displayName.trim(),
-      id,
+      `UPDATE players SET ${assignments.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      values,
     );
   },
 
   async delete(db: SQLiteDatabase, id: number): Promise<void> {
     await db.runAsync('DELETE FROM players WHERE id = ?', id);
+  },
+};
+
+/** Per-user privacy and notification preferences (RF-14). */
+export const preferencesRepository = {
+  /** Returns the user's preferences, lazily creating the default row on first access. */
+  async getForUser(db: SQLiteDatabase, userId: number): Promise<UserPreferences> {
+    await db.runAsync('INSERT OR IGNORE INTO user_preferences (user_id) VALUES (?)', userId);
+    const row = await db.getFirstAsync<UserPreferences>(
+      'SELECT * FROM user_preferences WHERE user_id = ?',
+      userId,
+    );
+    if (!row) throw new Error('Failed to resolve user preferences.');
+    return row;
+  },
+
+  async update(
+    db: SQLiteDatabase,
+    userId: number,
+    changes: { privacy?: UserPreferences['privacy']; notifications_enabled?: boolean },
+  ): Promise<void> {
+    await preferencesRepository.getForUser(db, userId);
+    const assignments: string[] = [];
+    const values: (string | number)[] = [];
+
+    if (changes.privacy !== undefined) {
+      assignments.push('privacy = ?');
+      values.push(changes.privacy);
+    }
+    if (changes.notifications_enabled !== undefined) {
+      assignments.push('notifications_enabled = ?');
+      values.push(changes.notifications_enabled ? 1 : 0);
+    }
+    if (assignments.length === 0) return;
+
+    values.push(userId);
+    await db.runAsync(
+      `UPDATE user_preferences SET ${assignments.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`,
+      values,
+    );
+  },
+};
+
+/** Read-model queries that feed the Profile tab (RF-13). */
+export const profileRepository = {
+  /** Counters for the profile header: tournaments organized, active registrations and the ranking record. */
+  async getStats(db: SQLiteDatabase, userId: number, playerId: number): Promise<ProfileStats> {
+    const organized = await db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM tournaments WHERE organizer_id = ?',
+      userId,
+    );
+    const participating = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM registrations
+       WHERE player_id = ? AND status IN ('pending', 'registered', 'waitlisted')`,
+      playerId,
+    );
+    const record = await db.getFirstAsync<{ wins: number | null; losses: number | null }>(
+      'SELECT SUM(wins) AS wins, SUM(losses) AS losses FROM rankings WHERE player_id = ?',
+      playerId,
+    );
+
+    return {
+      organized: organized?.count ?? 0,
+      participating: participating?.count ?? 0,
+      wins: record?.wins ?? 0,
+      losses: record?.losses ?? 0,
+    };
+  },
+
+  /** The player's position in a game's local leaderboard (RF-14: "ranking local"). */
+  async getRankForGame(db: SQLiteDatabase, playerId: number, gameId: number): Promise<PlayerRankSummary | null> {
+    const row = await db.getFirstAsync<PlayerRankSummary>(
+      `SELECT r.rating, r.wins, r.losses,
+        (SELECT COUNT(*) FROM rankings r2
+          WHERE r2.game_id = r.game_id
+            AND (r2.rating > r.rating OR (r2.rating = r.rating AND r2.wins > r.wins))) + 1 AS position,
+        (SELECT COUNT(*) FROM rankings r3 WHERE r3.game_id = r.game_id) AS total
+       FROM rankings r
+       WHERE r.player_id = ? AND r.game_id = ?`,
+      playerId,
+      gameId,
+    );
+    return row ?? null;
+  },
+
+  /** Completed matches the player took part in, newest first (profile history, RF-13). */
+  listMatchHistory(db: SQLiteDatabase, playerId: number, limit = 20): Promise<MatchHistoryItem[]> {
+    return db.getAllAsync<MatchHistoryItem>(
+      `SELECT m.*,
+        p1.display_name AS player_one_name,
+        p2.display_name AS player_two_name,
+        pw.display_name AS winner_name,
+        pr.display_name AS referee_name,
+        t.id AS tournament_id,
+        t.name AS tournament_name,
+        g.name AS game_name
+       FROM matches m
+       JOIN stages s ON s.id = m.stage_id
+       JOIN tournaments t ON t.id = s.tournament_id
+       JOIN games g ON g.id = t.game_id
+       LEFT JOIN players p1 ON p1.id = m.player_one_id
+       LEFT JOIN players p2 ON p2.id = m.player_two_id
+       LEFT JOIN players pw ON pw.id = m.winner_id
+       LEFT JOIN players pr ON pr.id = m.referee_id
+       WHERE (m.player_one_id = ? OR m.player_two_id = ?) AND m.status = 'completed'
+       ORDER BY m.id DESC
+       LIMIT ?`,
+      playerId,
+      playerId,
+      limit,
+    );
   },
 };
 

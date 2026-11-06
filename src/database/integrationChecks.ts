@@ -69,7 +69,7 @@ export async function runDatabaseIntegrationChecks(db: SQLiteDatabase): Promise<
     if (!player || player.display_name !== `DB Check Player ${suffix}`) {
       throw new Error('Player read-after-create check failed.');
     }
-    await playerRepository.update(db, playerId, `DB Check Player Updated ${suffix}`);
+    await playerRepository.update(db, playerId, { display_name: `DB Check Player Updated ${suffix}` });
     const updatedPlayer = await playerRepository.getById(db, playerId);
     if (updatedPlayer?.display_name !== `DB Check Player Updated ${suffix}`) {
       throw new Error('Player update check failed.');

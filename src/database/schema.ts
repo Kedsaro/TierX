@@ -1,5 +1,5 @@
 export const DATABASE_NAME = 'tierx.db';
-export const DATABASE_VERSION = 5;
+export const DATABASE_VERSION = 6;
 
 export const migrations: Record<number, string> = {
   1: `
@@ -210,6 +210,10 @@ export const migrations: Record<number, string> = {
     ALTER TABLE matches ADD COLUMN referee_id INTEGER REFERENCES players(id) ON DELETE SET NULL;
 
     CREATE INDEX idx_matches_referee ON matches(referee_id);
+  `,
+  6: `
+    ALTER TABLE players ADD COLUMN avatar_uri TEXT;
+    ALTER TABLE players ADD COLUMN bio TEXT;
   `,
 };
 

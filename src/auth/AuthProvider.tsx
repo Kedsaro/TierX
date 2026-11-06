@@ -44,6 +44,8 @@ interface AuthContextValue {
   authService: AuthService;
   signIn: (login: string, password: string) => Promise<void>;
   register: (input: { username: string; email: string; password: string; acceptedTerms: boolean }) => ReturnType<AuthService['register']>;
+  /** Re-reads the persisted user after an account edit (e.g. username/email changes on Edit Profile). */
+  refreshUser: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -82,13 +84,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
 
+  async function refreshUser(): Promise<void> {
+    setUser(await authService.restoreSession());
+  }
+
   async function signOut(): Promise<void> {
     await authService.signOut();
     setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, authService, signIn, register: authService.register, signOut }}>
+    <AuthContext.Provider value={{ user, isLoading, authService, signIn, register: authService.register, refreshUser, signOut }}>
       {children}
     </AuthContext.Provider>
   );
