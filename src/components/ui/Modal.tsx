@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Modal as NativeModal, Pressable, Text, View } from 'react-native';
+import { Modal as NativeModal, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 
@@ -23,7 +23,7 @@ export function Modal({ visible, title, onClose, children, footer }: ModalProps)
               <X color="#4d5d55" size={22} />
             </Pressable>
           </View>
-          <View className="shrink">{children}</View>
+          <ScrollView className="shrink" showsVerticalScrollIndicator={false} contentContainerClassName="pb-1">{children}</ScrollView>
           {footer ? <View className="mt-5">{footer}</View> : null}
         </View>
       </SafeAreaView>

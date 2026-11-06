@@ -1,5 +1,5 @@
 export const DATABASE_NAME = 'tierx.db';
-export const DATABASE_VERSION = 6;
+export const DATABASE_VERSION = 7;
 
 export const migrations: Record<number, string> = {
   1: `
@@ -214,6 +214,17 @@ export const migrations: Record<number, string> = {
   6: `
     ALTER TABLE players ADD COLUMN avatar_uri TEXT;
     ALTER TABLE players ADD COLUMN bio TEXT;
+  `,
+  7: `
+    CREATE TABLE app_settings (
+      key TEXT PRIMARY KEY CHECK (length(trim(key)) > 0),
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    INSERT OR IGNORE INTO app_settings (key, value) VALUES
+      ('tournament_creation_enabled', 'true'),
+      ('site_notice', '');
   `,
 };
 

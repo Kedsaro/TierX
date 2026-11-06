@@ -194,7 +194,7 @@ export function EventDetailScreen({ route, navigation }: Props) {
     if (proceed) void runStatusChange('cancelled');
   }
 
-  const isOrganizer = event ? canManageTournament({ organizer_id: event.organizer_id }, user?.id) : false;
+  const isOrganizer = event ? canManageTournament({ organizer_id: event.organizer_id }, user?.id, user?.role) : false;
   const minScheduleDate = minimumScheduleDateTime();
   const editEndMinimumDate = (() => {
     const startDate = parseScheduleDate(editStartsAt);

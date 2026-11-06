@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Database, MapPin, Pencil, Trash2, Trophy, UserRound } from 'lucide-react-native';
+import { Bell, Database, MapPin, Pencil, ShieldCheck, Trash2, Trophy, UserRound } from 'lucide-react-native';
 import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -12,7 +12,9 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { FeedbackState } from '../components/ui/FeedbackState';
-import { countryRepository, gameRepository, playerRepository, preferencesRepository, profileRepository, rankingRepository, tournamentRepository } from '../database/repositories';
+import { countryRepository, gameRepository, notificationRepository, playerRepository, preferencesRepository, profileRepository, rankingRepository, tournamentRepository } from '../database/repositories';
+import { isAdminRole } from '../tournaments/authorization';
+import type { AppNotification } from '../types/admin';
 import { useCurrentPlayer } from '../hooks/useCurrentPlayer';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 import type { ProfileStackParamList } from '../navigation/tournaments/types';
@@ -34,6 +36,8 @@ interface ProfileData {
   history: MatchHistoryItem[];
   countryName: string | null;
   favoriteGameName: string | null;
+  notifications: AppNotification[];
+  unreadCount: number;
 }
 
 export function ProfileScreen() {
@@ -46,7 +50,7 @@ export function ProfileScreen() {
 
   const fetchProfile = useCallback(async (): Promise<ProfileData> => {
     if (!user || !linkedPlayer) throw new Error('No signed-in player.');
-    const [player, preferences, stats, created, participating, history, countries, games] = await Promise.all([
+    const [player, preferences, stats, created, participating, history, countries, games, notifications, unreadCount] = await Promise.all([
       playerRepository.getById(db, linkedPlayer.id),
       preferencesRepository.getForUser(db, user.id),
       profileRepository.getStats(db, user.id, linkedPlayer.id),
@@ -55,6 +59,8 @@ export function ProfileScreen() {
       profileRepository.listMatchHistory(db, linkedPlayer.id),
       countryRepository.list(db),
       gameRepository.list(db),
+      notificationRepository.listForUser(db, user.id, 10),
+      notificationRepository.unreadCount(db, user.id),
     ]);
 
     const favoriteGameId = player?.favorite_game_id ?? null;
@@ -76,6 +82,8 @@ export function ProfileScreen() {
       history,
       countryName: countries.find((country) => country.id === player?.country_id)?.name ?? null,
       favoriteGameName: games.find((game) => game.id === favoriteGameId)?.name ?? null,
+      notifications,
+      unreadCount,
     };
   }, [db, user, linkedPlayer]);
 
@@ -162,7 +170,7 @@ export function ProfileScreen() {
     );
   }
 
-  const { player, preferences, stats, rank, leaderboard, created, participating, history, countryName, favoriteGameName } = data;
+  const { player, preferences, stats, rank, leaderboard, created, participating, history, countryName, favoriteGameName, notifications, unreadCount } = data;
   const winRate = stats.wins + stats.losses > 0 ? Math.round((stats.wins / (stats.wins + stats.losses)) * 100) : null;
   const initials = player.display_name.trim().slice(0, 2).toUpperCase();
 
@@ -171,15 +179,28 @@ export function ProfileScreen() {
       <ScrollView contentContainerClassName="px-5 pb-8" showsVerticalScrollIndicator={false}>
         <View className="flex-row items-center justify-between py-5">
           <Text className="text-2xl font-bold text-[#17231f]">Profile</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Edit profile"
-            className="flex-row items-center gap-1.5 rounded-lg bg-[#e1eee8] px-3 py-2"
-            onPress={() => navigation.navigate('EditProfile')}
-          >
-            <Pencil color="#17483e" size={15} />
-            <Text className="text-sm font-bold text-[#17483e]">Edit</Text>
-          </Pressable>
+          <View className="flex-row gap-2">
+            {isAdminRole(user?.role) ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Administration"
+                className="flex-row items-center gap-1.5 rounded-lg bg-[#173d35] px-3 py-2"
+                onPress={() => navigation.navigate('Admin')}
+              >
+                <ShieldCheck color="#f2bd56" size={15} />
+                <Text className="text-sm font-bold text-[#f2bd56]">Admin</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit profile"
+              className="flex-row items-center gap-1.5 rounded-lg bg-[#e1eee8] px-3 py-2"
+              onPress={() => navigation.navigate('EditProfile')}
+            >
+              <Pencil color="#17483e" size={15} />
+              <Text className="text-sm font-bold text-[#17483e]">Edit</Text>
+            </Pressable>
+          </View>
         </View>
 
         <Card className="items-center px-5 py-6">
@@ -211,6 +232,41 @@ export function ProfileScreen() {
           <StatCard label="Wins" value={stats.wins} />
           <StatCard label="Losses" value={stats.losses} />
         </View>
+
+        <Card className="mt-4 px-4 py-4">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-2">
+              <Bell color="#176b5b" size={16} />
+              <Text className="text-base font-bold text-[#17231f]">Notifications</Text>
+            </View>
+            {unreadCount > 0 ? <Badge label={`${unreadCount} new`} tone="accent" /> : null}
+          </View>
+          {notifications.length === 0 ? (
+            <Text className="mt-3 text-sm leading-5 text-[#65736c]">
+              Registrations, match schedules and results will show up here.
+            </Text>
+          ) : (
+            notifications.slice(0, 5).map((notification) => (
+              <View className="flex-row items-start gap-3 border-b border-[#e7ece8] py-3" key={notification.id}>
+                <View className={`mt-1.5 h-2 w-2 rounded-full ${notification.read_at ? 'bg-[#dfe7e1]' : 'bg-[#176b5b]'}`} />
+                <View className="min-w-0 flex-1">
+                  <Text className="text-sm font-semibold text-[#17231f]" numberOfLines={1}>{notification.title}</Text>
+                  <Text className="mt-0.5 text-xs leading-4 text-[#65736c]" numberOfLines={2}>{notification.message}</Text>
+                </View>
+              </View>
+            ))
+          )}
+          {unreadCount > 0 ? (
+            <View className="mt-3">
+              <Button
+                onPress={() => void notificationRepository.markAllRead(db, user!.id).then(load)}
+                variant="secondary"
+              >
+                Mark all as read
+              </Button>
+            </View>
+          ) : null}
+        </Card>
 
         <Card className="mt-4 px-4 py-4">
           <View className="flex-row items-center justify-between">
