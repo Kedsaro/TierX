@@ -13,3 +13,8 @@ export type HomeStackParamList = {
 export type TournamentsStackParamList = {
   TournamentsMain: undefined;
 } & TournamentDetailParams;
+
+export type ProfileStackParamList = {
+  ProfileMain: undefined;
+  EditProfile: undefined;
+} & TournamentDetailParams;

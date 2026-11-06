@@ -2,6 +2,8 @@ export interface Player {
   id: number;
   user_id: number | null;
   display_name: string;
+  avatar_uri: string | null;
+  bio: string | null;
   country_id: number | null;
   favorite_game_id: number | null;
   created_at: string;
@@ -21,6 +23,17 @@ export interface Ranking {
 export interface CreatePlayerInput {
   display_name: string;
   user_id?: number | null;
+  avatar_uri?: string | null;
+  bio?: string | null;
+  country_id?: number | null;
+  favorite_game_id?: number | null;
+}
+
+/** Editable player-profile fields (RF-14); all of them are optional. */
+export interface UpdatePlayerInput {
+  display_name?: string;
+  avatar_uri?: string | null;
+  bio?: string | null;
   country_id?: number | null;
   favorite_game_id?: number | null;
 }
