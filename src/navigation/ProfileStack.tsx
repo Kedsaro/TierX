@@ -1,5 +1,6 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { AdminScreen } from '../screens/admin/AdminScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { BracketScreen } from '../screens/events/BracketScreen';
 import { EventDetailScreen } from '../screens/events/EventDetailScreen';
@@ -25,6 +26,7 @@ export function ProfileStack() {
     >
       <Stack.Screen name="ProfileMain" component={ProfileScreen} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="Admin" component={AdminScreen} />
       <Stack.Screen name="TournamentDetail" component={TournamentDetailScreen} />
       <Stack.Screen name="TournamentForm" component={TournamentFormScreen} />
       <Stack.Screen name="EventDetail" component={EventDetailScreen} />

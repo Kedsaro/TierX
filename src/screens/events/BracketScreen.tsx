@@ -13,6 +13,7 @@ import { FeedbackState } from '../../components/ui/FeedbackState';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { matchRepository, registrationRepository, rankingRepository, stageRepository, tournamentRepository } from '../../database/repositories';
+import { notifyMatchPlayers } from '../../notifications/dispatch';
 import type { TournamentDetailParams } from '../../navigation/tournaments/types';
 import { canManageTournament } from '../../tournaments/authorization';
 import { availableMatchActions } from '../../tournaments/matchActions';
@@ -186,7 +187,11 @@ export function BracketScreen({ route, navigation }: Props) {
     refreshStageMatches(stageId);
   }
 
-  const isOrganizer = tournament ? canManageTournament(tournament, user?.id) : false;
+  const isOrganizer = tournament ? canManageTournament(tournament, user?.id, user?.role) : false;
+  // Once the tournament is completed the bracket becomes read-only results
+  // for everyone — organizers and participants alike (T-086 refinement).
+  const isCompleted = tournament?.status === 'completed';
+  const canEdit = isOrganizer && !isCompleted;
 
   if (isLoading) {
     return (
@@ -210,7 +215,7 @@ export function BracketScreen({ route, navigation }: Props) {
     );
   }
 
-  if (!isOrganizer) {
+  if (!isOrganizer && !isCompleted) {
     return (
       <SafeAreaView className="flex-1 bg-[#f4f6f2]" edges={['top', 'bottom']}>
         <FeedbackState
@@ -236,17 +241,18 @@ export function BracketScreen({ route, navigation }: Props) {
           <ChevronLeft color="#26352e" size={24} />
         </Pressable>
         <Text accessibilityRole="header" className="text-base font-bold text-[#17231f]" numberOfLines={1}>
-          Bracket · {tournament.name}
+          {isCompleted ? 'Bracket results' : 'Bracket'} · {tournament.name}
         </Text>
       </View>
 
       <ScrollView className="flex-1" contentContainerClassName="gap-4 px-5 pb-8 pt-3">
-        {participants.length === 0 ? (
+        {!canEdit ? null : participants.length === 0 ? (
           <Card className="p-4">
             <Text className="text-sm text-[#65736c]">No participants are registered yet. Stages and matches can still be created, but players cannot be assigned until someone registers.</Text>
           </Card>
         ) : null}
 
+        {canEdit ? (
         <Card className="gap-3 p-4">
           <Text className="text-sm font-bold uppercase tracking-wide text-[#65736c]">Add stage</Text>
           <Input label="Name" onChangeText={setNewStageName} placeholder="e.g. Group Stage, Playoffs" value={newStageName} />
@@ -271,12 +277,13 @@ export function BracketScreen({ route, navigation }: Props) {
             Add stage
           </Button>
         </Card>
+        ) : null}
 
         {stages.length === 0 ? (
           <FeedbackState
-            description="Add a stage above (e.g. Group Stage or Playoffs) to start building the bracket."
+            description={canEdit ? 'Add a stage above (e.g. Group Stage or Playoffs) to start building the bracket.' : 'No matches were played in this tournament.'}
             kind="empty"
-            title="No stages yet"
+            title={canEdit ? 'No stages yet' : 'No bracket results'}
           />
         ) : (
           stages.map((stage) => (
@@ -286,9 +293,11 @@ export function BracketScreen({ route, navigation }: Props) {
                   <Text className="text-base font-bold text-[#17231f]">{stage.name}</Text>
                   <Text className="text-xs text-[#65736c]">Stage {stage.position} · {stage.format}</Text>
                 </View>
-                <Pressable accessibilityLabel="Delete stage" accessibilityRole="button" hitSlop={8} onPress={() => void handleDeleteStage(stage)}>
-                  <Trash2 color="#a93232" size={18} />
-                </Pressable>
+                {canEdit ? (
+                  <Pressable accessibilityLabel="Delete stage" accessibilityRole="button" hitSlop={8} onPress={() => void handleDeleteStage(stage)}>
+                    <Trash2 color="#a93232" size={18} />
+                  </Pressable>
+                ) : null}
               </View>
 
               <View className="gap-2">
@@ -299,6 +308,10 @@ export function BracketScreen({ route, navigation }: Props) {
                     match={match}
                     onAssign={async (input) => {
                       await matchRepository.assign(db, match.id, input);
+                      // RF-15: players hear about their schedule as soon as it is set or changed.
+                      if (input.scheduled_at) {
+                        await notifyMatchPlayers(db, input, 'schedule', 'Match scheduled', `Your match in "${tournament.name}" was scheduled for ${formatDateTime(input.scheduled_at)}.`);
+                      }
                       refreshStageMatches(stage.id);
                     }}
                     onCancel={async () => {
@@ -327,6 +340,7 @@ export function BracketScreen({ route, navigation }: Props) {
                         evidence_uri: input.evidenceUri.trim() || null,
                       });
                       await rankingRepository.recordMatchOutcome(db, tournament.game_id, result.winnerId, result.loserId);
+                      await notifyMatchPlayers(db, match, 'result', 'Result published', `Your match in "${tournament.name}" ended ${result.scoreOne} - ${result.scoreTwo}.`);
                       refreshStageMatches(stage.id);
                     }}
                     onResolveDispute={async () => {
@@ -335,15 +349,17 @@ export function BracketScreen({ route, navigation }: Props) {
                     }}
                     onStart={async () => {
                       await matchRepository.markOngoing(db, match.id);
+                      await notifyMatchPlayers(db, match, 'match_started', 'Match started', `Your match in "${tournament.name}" is now ongoing.`);
                       refreshStageMatches(stage.id);
                     }}
                     onToggle={() => setExpandedMatchId((current) => (current === match.id ? null : match.id))}
                     participants={participants}
+                    readOnly={!canEdit}
                   />
                 ))}
               </View>
 
-              {matchFormStageId === stage.id ? (
+              {canEdit ? (matchFormStageId === stage.id ? (
                 <View className="gap-3 rounded-lg border border-[#dfe7e1] bg-[#f4f6f2] p-3">
                   <View className="flex-row gap-3">
                     <View className="flex-1">
@@ -377,7 +393,7 @@ export function BracketScreen({ route, navigation }: Props) {
                 >
                   Add match
                 </Button>
-              )}
+              )) : null}
             </Card>
           ))
         )}
@@ -398,6 +414,8 @@ interface MatchRowProps {
   onCancel: () => Promise<void>;
   onDelete: () => Promise<void>;
   onPublishResult: (input: { scoreOneText: string; scoreTwoText: string; evidenceUri: string }) => Promise<string | void>;
+  /** Read-only results view — used once the tournament is completed. */
+  readOnly?: boolean;
 }
 
 const UNASSIGNED = -1;
@@ -414,6 +432,7 @@ function MatchRow({
   onCancel,
   onDelete,
   onPublishResult,
+  readOnly = false,
 }: MatchRowProps) {
   const [playerOneId, setPlayerOneId] = useState(match.player_one_id ?? UNASSIGNED);
   const [playerTwoId, setPlayerTwoId] = useState(match.player_two_id ?? UNASSIGNED);
@@ -486,7 +505,22 @@ function MatchRow({
         {expanded ? <ChevronUp color="#65736c" size={18} /> : <ChevronDown color="#65736c" size={18} />}
       </Pressable>
 
-      {expanded ? (
+      {expanded && readOnly ? (
+        <View className="gap-2 border-t border-[#dfe7e1] p-3">
+          <Text className="text-sm text-[#4d5d55]">Player one: {match.player_one_name ?? 'TBD'}</Text>
+          <Text className="text-sm text-[#4d5d55]">Player two: {match.player_two_name ?? 'TBD'}</Text>
+          {match.referee_name ? <Text className="text-sm text-[#4d5d55]">Referee: {match.referee_name}</Text> : null}
+          <Text className="text-sm text-[#4d5d55]">Scheduled: {formatDateTime(match.scheduled_at)}</Text>
+          {match.status === 'completed' ? (
+            <Text className="text-sm font-semibold text-[#17231f]">
+              Final score: {match.score_one} - {match.score_two} · Winner: {match.winner_name}
+            </Text>
+          ) : null}
+          {match.evidence_uri ? <Text className="text-xs text-[#65736c]" numberOfLines={1}>Evidence: {match.evidence_uri}</Text> : null}
+        </View>
+      ) : null}
+
+      {expanded && !readOnly ? (
         <View className="gap-4 border-t border-[#dfe7e1] p-3">
           <View className="gap-3">
             <Select label="Player one" onChange={setPlayerOneId} options={participantOptions} value={playerOneId} />

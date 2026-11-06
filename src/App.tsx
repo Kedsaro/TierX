@@ -14,6 +14,7 @@ import { runTournamentManagementIntegrationChecks } from './tournaments/integrat
 import { runRegistrationIntegrationChecks } from './tournaments/registrationIntegrationChecks';
 import { runEventsIntegrationChecks } from './tournaments/eventsIntegrationChecks';
 import { runProfileIntegrationChecks } from './profile/integrationChecks';
+import { runAdminIntegrationChecks } from './admin/integrationChecks';
 import { AppNavigation } from './navigation/AppNavigation';
 
 const navigationTheme = {
@@ -70,8 +71,9 @@ function DatabaseIntegrationCheck() {
       .then(() => runRegistrationIntegrationChecks(db))
       .then(() => runEventsIntegrationChecks(db))
       .then(() => runProfileIntegrationChecks(db))
+      .then(() => runAdminIntegrationChecks(db))
       .then(
-        () => console.info('Database, authentication, tournament management, registration, events/bracket and profile integration checks passed.'),
+        () => console.info('Database, authentication, tournament management, registration, events/bracket, profile and admin integration checks passed.'),
         (error: unknown) => console.error('SQLite integration checks failed.', error),
       );
   }, [db]);

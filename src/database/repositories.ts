@@ -4,6 +4,7 @@ import type { CreateEventInput, EventSummary, TournamentEvent, TournamentEventSt
 import type { CreateMatchInput, CreateStageInput, Match, MatchDetails, MatchStatus, Stage } from '../types/match';
 import type { CreatePlayerInput, Player, Ranking, RankingWithPlayer, UpdatePlayerInput } from '../types/player';
 import type { MatchHistoryItem, PlayerRankSummary, ProfileStats, UserPreferences } from '../types/profile';
+import type { AppNotification, AppSetting, AuditLogEntry, AuditLogSummary, ReportStatus, ReportSummary } from '../types/admin';
 import type { Registration } from '../types/registration';
 import type {
   CreateTournamentInput,
@@ -43,6 +44,10 @@ export const userRepository = {
     return db.getAllAsync<User>('SELECT * FROM users ORDER BY created_at DESC, id DESC');
   },
 
+  listByRole(db: SQLiteDatabase, role: User['role']): Promise<User[]> {
+    return db.getAllAsync<User>('SELECT * FROM users WHERE role = ? ORDER BY username COLLATE NOCASE', role);
+  },
+
   async updateProfile(
     db: SQLiteDatabase,
     id: number,
@@ -52,6 +57,14 @@ export const userRepository = {
       'UPDATE users SET username = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       changes.username.trim(),
       changes.email.trim().toLowerCase(),
+      id,
+    );
+  },
+
+  async updateRole(db: SQLiteDatabase, id: number, role: User['role']): Promise<void> {
+    await db.runAsync(
+      'UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      role,
       id,
     );
   },
@@ -84,6 +97,15 @@ export const gameRepository = {
 
   list(db: SQLiteDatabase): Promise<Game[]> {
     return db.getAllAsync<Game>('SELECT * FROM games WHERE is_active = 1 ORDER BY name COLLATE NOCASE');
+  },
+
+  /** Includes inactive games — for the admin catalog view. */
+  listAll(db: SQLiteDatabase): Promise<Game[]> {
+    return db.getAllAsync<Game>('SELECT * FROM games ORDER BY name COLLATE NOCASE');
+  },
+
+  async setActive(db: SQLiteDatabase, id: number, isActive: boolean): Promise<void> {
+    await db.runAsync('UPDATE games SET is_active = ? WHERE id = ?', isActive ? 1 : 0, id);
   },
 
   async delete(db: SQLiteDatabase, id: number): Promise<void> {
@@ -610,8 +632,154 @@ export const registrationRepository = {
     );
   },
 
+  /** User ids of everyone actively following a tournament — registered players plus its organizer (RF-15 targets). */
+  listFollowerUserIds(db: SQLiteDatabase, tournamentId: number): Promise<{ user_id: number }[]> {
+    return db.getAllAsync<{ user_id: number }>(
+      `SELECT DISTINCT p.user_id
+       FROM registrations r JOIN players p ON p.id = r.player_id
+       WHERE r.tournament_id = ? AND r.status IN ('pending', 'registered', 'waitlisted') AND p.user_id IS NOT NULL`,
+      tournamentId,
+    );
+  },
+
   async delete(db: SQLiteDatabase, id: number): Promise<void> {
     await db.runAsync('DELETE FROM registrations WHERE id = ?', id);
+  },
+};
+
+/** In-app notification feed (RF-15); rows are only written when the recipient has notifications enabled. */
+export const notificationRepository = {
+  create(db: SQLiteDatabase, input: { user_id: number; type: string; title: string; message: string }): Promise<number> {
+    return db.runAsync(
+      'INSERT INTO notifications (user_id, type, title, message) VALUES (?, ?, ?, ?)',
+      input.user_id,
+      input.type,
+      input.title,
+      input.message,
+    ).then((result) => result.lastInsertRowId);
+  },
+
+  listForUser(db: SQLiteDatabase, userId: number, limit = 30): Promise<AppNotification[]> {
+    return db.getAllAsync<AppNotification>(
+      'SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT ?',
+      userId,
+      limit,
+    );
+  },
+
+  async unreadCount(db: SQLiteDatabase, userId: number): Promise<number> {
+    const row = await db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read_at IS NULL',
+      userId,
+    );
+    return row?.count ?? 0;
+  },
+
+  async markRead(db: SQLiteDatabase, id: number): Promise<void> {
+    await db.runAsync('UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE id = ?', id);
+  },
+
+  async markAllRead(db: SQLiteDatabase, userId: number): Promise<void> {
+    await db.runAsync('UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE user_id = ? AND read_at IS NULL', userId);
+  },
+};
+
+/** Player-submitted reports about tournaments or users (RF-17). */
+export const reportRepository = {
+  create(db: SQLiteDatabase, input: { reporter_id: number; tournament_id?: number | null; target_user_id?: number | null; reason: string; details?: string | null }): Promise<number> {
+    return db.runAsync(
+      'INSERT INTO reports (reporter_id, tournament_id, target_user_id, reason, details) VALUES (?, ?, ?, ?, ?)',
+      input.reporter_id,
+      input.tournament_id ?? null,
+      input.target_user_id ?? null,
+      input.reason.trim(),
+      input.details ?? null,
+    ).then((result) => result.lastInsertRowId);
+  },
+
+  list(db: SQLiteDatabase, status?: ReportStatus): Promise<ReportSummary[]> {
+    const conditions: string[] = [];
+    const values: string[] = [];
+    if (status) {
+      conditions.push('r.status = ?');
+      values.push(status);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    return db.getAllAsync<ReportSummary>(
+      `SELECT r.*, ru.username AS reporter_username, t.name AS tournament_name, tu.username AS target_username
+       FROM reports r
+       JOIN users ru ON ru.id = r.reporter_id
+       LEFT JOIN tournaments t ON t.id = r.tournament_id
+       LEFT JOIN users tu ON tu.id = r.target_user_id
+       ${where}
+       ORDER BY (r.status = 'open') DESC, r.id DESC`,
+      values,
+    );
+  },
+
+  async updateStatus(db: SQLiteDatabase, id: number, status: ReportStatus): Promise<void> {
+    await db.runAsync(
+      `UPDATE reports SET status = ?, resolved_at = CASE WHEN ? IN ('resolved', 'dismissed') THEN CURRENT_TIMESTAMP ELSE resolved_at END WHERE id = ?`,
+      status,
+      status,
+      id,
+    );
+  },
+};
+
+/** Append-only administrative traceability (RF-17): every admin action is logged here. */
+export const auditRepository = {
+  log(db: SQLiteDatabase, input: { actor_user_id: number; action: string; entity_type: string; entity_id?: number | null; details?: string | null }): Promise<number> {
+    return db.runAsync(
+      'INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)',
+      input.actor_user_id,
+      input.action,
+      input.entity_type,
+      input.entity_id ?? null,
+      input.details ?? null,
+    ).then((result) => result.lastInsertRowId);
+  },
+
+  list(db: SQLiteDatabase, limit = 50): Promise<AuditLogSummary[]> {
+    return db.getAllAsync<AuditLogSummary>(
+      `SELECT a.*, u.username AS actor_username
+       FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id
+       ORDER BY a.id DESC LIMIT ?`,
+      limit,
+    );
+  },
+
+  listForEntity(db: SQLiteDatabase, entityType: string, entityId: number): Promise<AuditLogEntry[]> {
+    return db.getAllAsync<AuditLogEntry>(
+      'SELECT * FROM audit_logs WHERE entity_type = ? AND entity_id = ? ORDER BY id DESC',
+      entityType,
+      entityId,
+    );
+  },
+};
+
+/** Global, admin-editable parameters stored as key/value pairs (RF-17). */
+export const settingsRepository = {
+  list(db: SQLiteDatabase): Promise<AppSetting[]> {
+    return db.getAllAsync<AppSetting>('SELECT * FROM app_settings ORDER BY key');
+  },
+
+  async get(db: SQLiteDatabase, key: string): Promise<string | null> {
+    const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', key);
+    return row?.value ?? null;
+  },
+
+  async isEnabled(db: SQLiteDatabase, key: string): Promise<boolean> {
+    return (await settingsRepository.get(db, key)) === 'true';
+  },
+
+  async set(db: SQLiteDatabase, key: string, value: string): Promise<void> {
+    await db.runAsync(
+      `INSERT INTO app_settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+      key,
+      value,
+    );
   },
 };
 

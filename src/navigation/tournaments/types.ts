@@ -17,4 +17,5 @@ export type TournamentsStackParamList = {
 export type ProfileStackParamList = {
   ProfileMain: undefined;
   EditProfile: undefined;
+  Admin: undefined;
 } & TournamentDetailParams;

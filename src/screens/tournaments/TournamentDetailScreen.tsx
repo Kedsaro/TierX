@@ -2,6 +2,7 @@ import {
   CalendarClock,
   CalendarPlus,
   ChevronLeft,
+  Flag,
   Globe2,
   MapPin,
   Pencil,
@@ -25,7 +26,8 @@ import { DateTimeField } from '../../components/ui/DateTimeField';
 import { FeedbackState } from '../../components/ui/FeedbackState';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
-import { eventRepository, registrationRepository, tournamentRepository } from '../../database/repositories';
+import { eventRepository, registrationRepository, reportRepository, tournamentRepository, userRepository } from '../../database/repositories';
+import { notifyTournamentFollowers, notifyUser } from '../../notifications/dispatch';
 import { useCurrentPlayer } from '../../hooks/useCurrentPlayer';
 import type { TournamentDetailParams } from '../../navigation/tournaments/types';
 import { availableActions, canManageTournament, nextStatusFor } from '../../tournaments/authorization';
@@ -137,6 +139,11 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
   const [createEventError, setCreateEventError] = useState<string | null>(null);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
 
+  const [isReportModalVisible, setIsReportModalVisible] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+
   const loadEvents = useCallback(() => {
     eventRepository.listByTournament(db, tournamentId).then(
       (rows) => setEvents(rows),
@@ -218,6 +225,15 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
     setActionError(null);
     try {
       await tournamentRepository.updateStatus(db, tournament.id, status);
+      // RF-15: everyone following this tournament hears about status changes.
+      await notifyTournamentFollowers(
+        db,
+        tournament,
+        'tournament_update',
+        `${tournament.name} is now ${statusLabels[status].toLowerCase()}`,
+        `The organizer ${status === 'cancelled' ? 'cancelled' : status === 'completed' ? 'closed' : 'updated'} "${tournament.name}".`,
+        user?.id,
+      );
       loadTournament();
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Could not update this tournament.');
@@ -232,6 +248,9 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
     setRegistrationError(null);
     try {
       await registrationRepository.register(db, tournamentId, player.id);
+      if (tournament) {
+        await notifyUser(db, tournament.organizer_id, 'registration', 'New registration', `${player.display_name} registered for "${tournament.name}".`);
+      }
       setIsRegistrationModalVisible(false);
       loadTournament();
       loadRegistration();
@@ -256,6 +275,9 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
     setRegistrationError(null);
     try {
       await registrationRepository.cancel(db, tournamentId, player.id);
+      if (tournament) {
+        await notifyUser(db, tournament.organizer_id, 'registration', 'Registration cancelled', `${player.display_name} cancelled their registration for "${tournament.name}".`);
+      }
       loadTournament();
       loadRegistration();
     } catch (cause) {
@@ -313,7 +335,35 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
     }
   }
 
-  const isOrganizer = tournament ? canManageTournament(tournament, user?.id) : false;
+  async function handleSubmitReport() {
+    if (!user || !tournament) return;
+    if (!reportReason.trim()) {
+      setReportError('Describe the reason for your report.');
+      return;
+    }
+    setIsSubmittingReport(true);
+    setReportError(null);
+    try {
+      await reportRepository.create(db, {
+        reporter_id: user.id,
+        tournament_id: tournament.id,
+        reason: reportReason.trim(),
+      });
+      // RF-15/RF-17: administrators are informed about new reports.
+      for (const admin of await userRepository.listByRole(db, 'admin')) {
+        await notifyUser(db, admin.id, 'admin', 'New report filed', `${user.username} reported "${tournament.name}": ${reportReason.trim()}`);
+      }
+      setIsReportModalVisible(false);
+      setReportReason('');
+      Alert.alert('Report sent', 'Our administrators will review your report.');
+    } catch (cause) {
+      setReportError(cause instanceof Error ? cause.message : 'Could not send your report.');
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  }
+
+  const isOrganizer = tournament ? canManageTournament(tournament, user?.id, user?.role) : false;
   const hasActiveRegistration = registration !== null && ACTIVE_REGISTRATION_STATUSES.includes(registration.status);
   const eligibility = tournament
     ? evaluateRegistrationEligibility(tournament, tournament.participant_count, user?.id)
@@ -334,6 +384,20 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
         <Text accessibilityRole="header" className="text-base font-bold text-[#17231f]">
           Tournament details
         </Text>
+        {tournament && !isOrganizer ? (
+          <Pressable
+            accessibilityLabel="Report tournament"
+            accessibilityRole="button"
+            className="ml-auto h-11 w-11 items-center justify-center rounded-lg active:bg-[#f9e4e2]"
+            onPress={() => {
+              setReportReason('');
+              setReportError(null);
+              setIsReportModalVisible(true);
+            }}
+          >
+            <Flag color="#a93232" size={20} />
+          </Pressable>
+        ) : null}
       </View>
 
       {isLoading ? (
@@ -477,9 +541,22 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                   onPress={() => navigation.navigate('Bracket', { tournamentId: tournament.id })}
                   variant="secondary"
                 >
-                  Manage bracket
+                  {tournament.status === 'completed' ? 'Bracket results' : 'Manage bracket'}
                 </Button>
               </View>
+            </View>
+          ) : null}
+
+          {tournament.status === 'completed' && !isOrganizer ? (
+            <View className="mt-5 gap-3">
+              <Text className="text-sm font-bold uppercase tracking-wide text-[#65736c]">Results</Text>
+              <Button
+                icon={<Swords color="#176b5b" size={16} />}
+                onPress={() => navigation.navigate('Bracket', { tournamentId: tournament.id })}
+                variant="secondary"
+              >
+                Bracket results
+              </Button>
             </View>
           ) : null}
 
@@ -602,6 +679,30 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
             value={newEventStreamUrl}
           />
           {createEventError ? <Text accessibilityRole="alert" className="text-sm text-[#a93232]">{createEventError}</Text> : null}
+        </View>
+      </Modal>
+
+      <Modal
+        footer={(
+          <View className="flex-row gap-3">
+            <View className="flex-1">
+              <Button onPress={() => setIsReportModalVisible(false)} variant="quiet">Cancel</Button>
+            </View>
+            <View className="flex-1">
+              <Button loading={isSubmittingReport} onPress={() => void handleSubmitReport()} variant="danger">Send report</Button>
+            </View>
+          </View>
+        )}
+        onClose={() => setIsReportModalVisible(false)}
+        title="Report tournament"
+        visible={isReportModalVisible}
+      >
+        <View className="gap-3">
+          <Text className="text-sm leading-5 text-[#4d5d55]">
+            Tell the administrators what is wrong with <Text className="font-bold text-[#17231f]">{tournament?.name}</Text>.
+          </Text>
+          <Input label="Reason" multiline onChangeText={setReportReason} placeholder="e.g. Suspicious organizer, wrong rules" value={reportReason} />
+          {reportError ? <Text accessibilityRole="alert" className="text-sm text-[#a93232]">{reportError}</Text> : null}
         </View>
       </Modal>
     </SafeAreaView>

@@ -1,7 +1,18 @@
 import type { Tournament, TournamentStatus } from '../types/tournament';
+import type { UserRole } from '../types/user';
 
-/** Only the organizer who created a tournament may edit or manage it. */
-export function canManageTournament(tournament: Pick<Tournament, 'organizer_id'>, userId: number | undefined): boolean {
+/** RF-16: administrators can manage every tournament; organizers only their own. */
+export function isAdminRole(role: UserRole | undefined): boolean {
+  return role === 'admin';
+}
+
+/** Only the organizer who created a tournament — or an admin — may edit or manage it. */
+export function canManageTournament(
+  tournament: Pick<Tournament, 'organizer_id'>,
+  userId: number | undefined,
+  role?: UserRole,
+): boolean {
+  if (isAdminRole(role)) return true;
   return userId !== undefined && tournament.organizer_id === userId;
 }
 

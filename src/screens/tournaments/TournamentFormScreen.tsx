@@ -12,7 +12,7 @@ import { DateTimeField } from '../../components/ui/DateTimeField';
 import { FeedbackState } from '../../components/ui/FeedbackState';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
-import { countryRepository, gameRepository, tournamentRepository } from '../../database/repositories';
+import { countryRepository, gameRepository, settingsRepository, tournamentRepository, userRepository } from '../../database/repositories';
 import { canManageTournament } from '../../tournaments/authorization';
 import { timezoneLabel, timezonesForCountryCode } from '../../tournaments/timezones';
 import {
@@ -57,7 +57,7 @@ function toEditableDateTime(isoValue: string | null): string {
 
 export function TournamentFormScreen({ route, navigation }: Props) {
   const db = useSQLiteContext();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const tournamentId = route.params?.tournamentId;
   const isEditing = tournamentId !== undefined;
 
@@ -129,7 +129,7 @@ export function TournamentFormScreen({ route, navigation }: Props) {
         setCountries(countryRows);
 
         if (tournamentId !== undefined) {
-          if (!tournament || !canManageTournament(tournament, user?.id)) {
+          if (!tournament || !canManageTournament(tournament, user?.id, user?.role)) {
             setLoadError('You are not authorized to edit this tournament.');
           } else {
             setExistingStatus(tournament.status);
@@ -167,7 +167,7 @@ export function TournamentFormScreen({ route, navigation }: Props) {
     return () => {
       isCurrent = false;
     };
-  }, [db, tournamentId, user?.id]);
+  }, [db, tournamentId, user?.id, user?.role]);
 
   function update<K extends keyof TournamentFormValues>(key: K, value: TournamentFormValues[K]) {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -252,7 +252,16 @@ export function TournamentFormScreen({ route, navigation }: Props) {
         await tournamentRepository.update(db, tournamentId, input);
         navigation.navigate('TournamentDetail', { tournamentId });
       } else {
+        if (!(await settingsRepository.isEnabled(db, 'tournament_creation_enabled'))) {
+          setSubmitError('Tournament creation is temporarily disabled by an administrator.');
+          return;
+        }
         const newId = await tournamentRepository.create(db, input);
+        // RF-16: creating a tournament promotes a plain user to organizer.
+        if (user.role === 'user') {
+          await userRepository.updateRole(db, user.id, 'organizer');
+          await refreshUser();
+        }
         navigation.replace('TournamentDetail', { tournamentId: newId });
       }
     } catch (cause) {
