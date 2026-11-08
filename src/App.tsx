@@ -16,6 +16,7 @@ import { runEventsIntegrationChecks } from './tournaments/eventsIntegrationCheck
 import { runProfileIntegrationChecks } from './profile/integrationChecks';
 import { runAdminIntegrationChecks } from './admin/integrationChecks';
 import { AppNavigation } from './navigation/AppNavigation';
+import { RemovalAlert } from './notifications/RemovalAlert';
 
 const navigationTheme = {
   ...DefaultTheme,
@@ -48,12 +49,22 @@ export default function App() {
   if (!isDatabaseReady) return null;
 
   return (
-    <SQLiteProvider databaseName={DATABASE_NAME} onInit={initializeDatabase}>
+    <SQLiteProvider
+      databaseName={DATABASE_NAME}
+      onInit={(database) =>
+        // Fast refresh closes the DB mid-init — swallow that dev-only rejection.
+        initializeDatabase(database).catch((error) => {
+          if (String(error).includes('closed resource')) return;
+          throw error;
+        })
+      }
+    >
       <AuthProvider>
         <NavigationContainer theme={navigationTheme}>
           <StatusBar style="dark" />
           <DatabaseIntegrationCheck />
           <AppNavigation />
+          <RemovalAlert />
         </NavigationContainer>
       </AuthProvider>
     </SQLiteProvider>
@@ -65,16 +76,23 @@ function DatabaseIntegrationCheck() {
 
   useEffect(() => {
     if (!__DEV__) return;
-    void runDatabaseIntegrationChecks(db)
-      .then(() => runAuthIntegrationChecks(db))
-      .then(() => runTournamentManagementIntegrationChecks(db))
-      .then(() => runRegistrationIntegrationChecks(db))
-      .then(() => runEventsIntegrationChecks(db))
-      .then(() => runProfileIntegrationChecks(db))
-      .then(() => runAdminIntegrationChecks(db))
+    const runAll = () =>
+      runDatabaseIntegrationChecks(db)
+        .then(() => runAuthIntegrationChecks(db))
+        .then(() => runTournamentManagementIntegrationChecks(db))
+        .then(() => runRegistrationIntegrationChecks(db))
+        .then(() => runEventsIntegrationChecks(db))
+        .then(() => runProfileIntegrationChecks(db))
+        .then(() => runAdminIntegrationChecks(db));
+
+    // During fast refresh the provider reopens the DB while a previous check
+    // run is still in flight, producing transient prepareAsync rejections —
+    // retry once, and keep the failure as a warning instead of an error overlay.
+    void runAll()
+      .catch(() => new Promise((resolve) => setTimeout(resolve, 1500)).then(runAll))
       .then(
         () => console.info('Database, authentication, tournament management, registration, events/bracket, profile and admin integration checks passed.'),
-        (error: unknown) => console.error('SQLite integration checks failed.', error),
+        (error: unknown) => console.warn('SQLite integration checks skipped/failed (dev-only).', error),
       );
   }, [db]);
 

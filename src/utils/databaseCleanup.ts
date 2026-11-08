@@ -61,6 +61,31 @@ export async function deleteUserByLogin(db: SQLiteDatabase, login: string): Prom
   }
 }
 
+/** Recomputes wins for test players: +1 per completed tournament where they are the sole un-eliminated participant — dev tool. */
+export async function resetAllRankings(db: SQLiteDatabase): Promise<void> {
+  await db.runAsync(
+    `UPDATE rankings SET wins = (
+       SELECT COUNT(*) FROM tournaments t
+       WHERE t.status = 'completed' AND t.game_id = rankings.game_id
+         AND EXISTS (
+           SELECT 1 FROM registrations r
+           WHERE r.tournament_id = t.id AND r.player_id = rankings.player_id
+             AND r.status IN ('pending', 'registered', 'waitlisted'))
+         AND rankings.player_id NOT IN (
+           SELECT mp.player_id FROM match_participants mp
+             JOIN matches m ON m.id = mp.match_id
+             JOIN stages s ON s.id = m.stage_id
+            WHERE s.tournament_id = t.id AND mp.eliminated = 1
+           UNION
+           SELECT CASE WHEN m.winner_id = m.player_one_id THEN m.player_two_id ELSE m.player_one_id END
+             FROM matches m JOIN stages s ON s.id = m.stage_id
+            WHERE s.tournament_id = t.id AND m.status = 'completed' AND m.winner_id IS NOT NULL
+         )
+     ), updated_at = CURRENT_TIMESTAMP
+      WHERE player_id IN (SELECT id FROM players WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'testuser%'))`,
+  );
+}
+
 /**
  * List all users in the database
  */
@@ -90,9 +115,9 @@ export async function listAllUsers(db: SQLiteDatabase): Promise<{ users: any[]; 
 /**
  * Create a test user automatically for development
  */
-export async function createTestUser(db: SQLiteDatabase, email: string): Promise<{ user: any; password: string }> {
+export async function createTestUser(db: SQLiteDatabase, email: string, username = 'testuser'): Promise<{ user: any; password: string }> {
   try {
-    const testUsername = 'testuser';
+    const testUsername = username;
     const testPassword = 'TestPass12';
     const passwordHash = await hashPassword(testPassword);
     
@@ -201,7 +226,7 @@ export async function seedDemoTournaments(
       organizer_id: organizerId,
       timezone: 'UTC',
       start_at: daysFromNow(3),
-      scope: 'local' as const,
+      scope: 'national' as const,
       visibility: 'public' as const,
       format: 'single_elimination',
       capacity: 16,
@@ -243,7 +268,7 @@ export async function seedDemoTournaments(
       organizer_id: organizerId,
       timezone: 'UTC',
       start_at: daysFromNow(20),
-      scope: 'regional' as const,
+      scope: 'international' as const,
       visibility: 'public' as const,
       format: 'single_elimination',
       capacity: 8,
@@ -257,7 +282,7 @@ export async function seedDemoTournaments(
       organizer_id: organizerId,
       timezone: 'UTC',
       start_at: daysFromNow(-10),
-      scope: 'local' as const,
+      scope: 'national' as const,
       visibility: 'public' as const,
       format: 'single_elimination',
       capacity: 16,

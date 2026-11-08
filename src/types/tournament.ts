@@ -1,6 +1,6 @@
 export type TournamentStatus = 'draft' | 'published' | 'ongoing' | 'completed' | 'cancelled';
 export type TournamentVisibility = 'public' | 'private' | 'unlisted';
-export type TournamentScope = 'local' | 'regional' | 'national' | 'international';
+export type TournamentScope = 'national' | 'international';
 
 export interface Tournament {
   id: number;
@@ -16,6 +16,10 @@ export interface Tournament {
   registration_opens_at: string | null;
   registration_closes_at: string | null;
   visibility: TournamentVisibility;
+  /** 8-digit join code required to register for private tournaments. */
+  access_code: string | null;
+  /** Host city (legacy column; no longer collected by the form). */
+  city: string | null;
   scope: TournamentScope;
   format: string;
   capacity: number;
@@ -40,6 +44,10 @@ export interface CreateTournamentInput {
   registration_opens_at?: string | null;
   registration_closes_at?: string | null;
   visibility?: TournamentVisibility;
+  /** 8-digit join code; required when `visibility` is 'private'. */
+  access_code?: string | null;
+  /** Host city (legacy column; no longer collected by the form). */
+  city?: string | null;
   scope?: TournamentScope;
   format: string;
   capacity: number;
@@ -62,6 +70,12 @@ export interface TournamentFilters {
   limit?: number;
   /** Excludes draft tournaments, regardless of `status`. Used for public listings. */
   excludeDraft?: boolean;
+  /**
+   * Only tournaments currently accepting registrations: published, inside the
+   * registration window (registration_opens_at <= now <= registration_closes_at,
+   * falling back to start_at) and with remaining capacity.
+   */
+  registrationOpen?: boolean;
 }
 
 /**

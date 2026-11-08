@@ -14,6 +14,7 @@ export type NotificationType =
   | 'match_started'
   | 'result'
   | 'tournament_update'
+  | 'removal'
   | 'admin';
 
 /**

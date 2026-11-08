@@ -1,5 +1,5 @@
 export const DATABASE_NAME = 'tierx.db';
-export const DATABASE_VERSION = 7;
+export const DATABASE_VERSION = 14;
 
 export const migrations: Record<number, string> = {
   1: `
@@ -225,6 +225,41 @@ export const migrations: Record<number, string> = {
     INSERT OR IGNORE INTO app_settings (key, value) VALUES
       ('tournament_creation_enabled', 'true'),
       ('site_notice', '');
+  `,
+  8: `
+    ALTER TABLE tournaments ADD COLUMN access_code TEXT
+      CHECK (access_code IS NULL OR access_code GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]');
+  `,
+  9: `
+    ALTER TABLE tournaments ADD COLUMN city TEXT;
+  `,
+  10: `
+    -- Scope was narrowed to national/international only.
+    UPDATE tournaments SET scope = 'national' WHERE scope = 'local';
+    UPDATE tournaments SET scope = 'international' WHERE scope = 'regional';
+  `,
+  11: `
+    -- A match can host more than two players (whole-round single match).
+    CREATE TABLE match_participants (
+      match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (match_id, player_id)
+    );
+
+    CREATE INDEX idx_match_participants_player ON match_participants(player_id);
+  `,
+  12: `
+    -- Track exactly which players were eliminated inside a multi-player match.
+    ALTER TABLE match_participants ADD COLUMN eliminated INTEGER NOT NULL DEFAULT 0 CHECK (eliminated IN (0, 1));
+  `,
+  13: `
+    -- Organizer's free-text summary published together with the round result.
+    ALTER TABLE matches ADD COLUMN details TEXT;
+  `,
+  14: `
+    -- A stage can be closed once its rounds are finished.
+    ALTER TABLE stages ADD COLUMN closed INTEGER NOT NULL DEFAULT 0 CHECK (closed IN (0, 1));
   `,
 };
 

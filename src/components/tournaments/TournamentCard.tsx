@@ -9,6 +9,8 @@ interface TournamentCardProps {
   gameName?: string;
   countryName?: string;
   organizerName?: string;
+  /** True when the viewer was removed by the organizer — replaces the status badge with "Banned". */
+  banned?: boolean;
   onPress?: () => void;
 }
 
@@ -28,7 +30,7 @@ const statusTones = {
   cancelled: 'danger',
 } as const;
 
-export function TournamentCard({ tournament, gameName, countryName, organizerName, onPress }: TournamentCardProps) {
+export function TournamentCard({ tournament, gameName, countryName, organizerName, banned = false, onPress }: TournamentCardProps) {
   const startDate = new Date(tournament.start_at);
   const dateLabel = Number.isNaN(startDate.getTime())
     ? tournament.start_at
@@ -43,7 +45,20 @@ export function TournamentCard({ tournament, gameName, countryName, organizerNam
             {gameName ?? `Game ${tournament.game_id}`}{organizerName ? ` · ${organizerName}` : ''}
           </Text>
         </View>
-        <Badge label={statusLabels[tournament.status]} tone={statusTones[tournament.status]} />
+        <View className="items-end gap-2">
+          <View className="flex-row gap-2">
+            {banned ? (
+              <Badge label="Banned" tone="danger" />
+            ) : (
+              <Badge label={statusLabels[tournament.status]} tone={statusTones[tournament.status]} />
+            )}
+            <Badge
+              label={tournament.visibility === 'private' ? 'Competitive' : 'Non-competitive'}
+              tone={tournament.visibility === 'private' ? 'dangerSolid' : 'info'}
+            />
+          </View>
+          {tournament.prizes ? <Badge label="Prize: Yes" tone="accent" /> : null}
+        </View>
       </View>
       {tournament.description ? (
         <Text className="mt-3 text-sm leading-5 text-[#4d5d55]" numberOfLines={2}>{tournament.description}</Text>

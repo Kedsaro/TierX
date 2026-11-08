@@ -2,6 +2,7 @@ export type TournamentDetailParams = {
   TournamentDetail: { tournamentId: number };
   /** Omit `tournamentId` to create a new tournament; include it to edit one. */
   TournamentForm: { tournamentId?: number } | undefined;
+  ManageParticipants: { tournamentId: number };
   EventDetail: { eventId: number };
   Bracket: { tournamentId: number };
 };

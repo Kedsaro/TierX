@@ -9,6 +9,8 @@ interface TournamentListProps {
   error?: string | null;
   onRetry?: () => void;
   onTournamentPress?: (tournament: Tournament) => void;
+  /** Tournament ids where the viewer was banned — their status badge shows "Banned". */
+  bannedIds?: Set<number>;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -19,6 +21,7 @@ export function TournamentList({
   error,
   onRetry,
   onTournamentPress,
+  bannedIds,
   emptyTitle = 'No tournaments found',
   emptyDescription = 'Try changing your search or filters.',
 }: TournamentListProps) {
@@ -50,6 +53,7 @@ export function TournamentList({
       keyExtractor={(tournament) => String(tournament.id)}
       renderItem={({ item }) => (
         <TournamentCard
+          banned={bannedIds?.has(item.id)}
           countryName={item.country_name}
           gameName={item.game_name}
           onPress={() => onTournamentPress?.(item)}

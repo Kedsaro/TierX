@@ -1,6 +1,6 @@
 import { ChevronLeft } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -17,6 +17,7 @@ import { canManageTournament } from '../../tournaments/authorization';
 import { timezoneLabel, timezonesForCountryCode } from '../../tournaments/timezones';
 import {
   emptyTournamentForm,
+  generateAccessCode,
   minimumScheduleDateTime,
   parseLocalDateTime,
   parseScheduleDate,
@@ -29,12 +30,17 @@ import type { TournamentScope, TournamentVisibility } from '../../types/tourname
 
 type Props = NativeStackScreenProps<TournamentDetailParams, 'TournamentForm'>;
 
-const steps = ['General', 'Game & location', 'Dates', 'Format & capacity', 'Rules & prizes', 'Review'] as const;
+const steps = ['General', 'Game & location', 'Dates', 'Rules & prizes', 'Review'] as const;
 
 const formatOptions = [
   { label: 'Single elimination', value: 'single_elimination' },
   { label: 'Double elimination', value: 'double_elimination' },
   { label: 'Round robin', value: 'round_robin' },
+];
+
+const tournamentTypeOptions: { label: string; value: TournamentVisibility }[] = [
+  { label: 'Non-competitive', value: 'public' },
+  { label: 'Competitive', value: 'private' },
 ];
 
 const visibilityOptions: { label: string; value: TournamentVisibility }[] = [
@@ -44,8 +50,6 @@ const visibilityOptions: { label: string; value: TournamentVisibility }[] = [
 ];
 
 const scopeOptions: { label: string; value: TournamentScope }[] = [
-  { label: 'Local', value: 'local' },
-  { label: 'Regional', value: 'regional' },
   { label: 'National', value: 'national' },
   { label: 'International', value: 'international' },
 ];
@@ -145,11 +149,13 @@ export function TournamentFormScreen({ route, navigation }: Props) {
               registrationOpensAt: toEditableDateTime(tournament.registration_opens_at),
               registrationClosesAt: toEditableDateTime(tournament.registration_closes_at),
               visibility: tournament.visibility,
+              accessCode: tournament.access_code ?? '',
               scope: tournament.scope,
               format: tournament.format,
               capacity: String(tournament.capacity),
               rules: tournament.rules ?? '',
               requirements: tournament.requirements ?? '',
+              hasPrize: tournament.prizes !== null && tournament.prizes !== '',
               prizes: tournament.prizes ?? '',
             });
           }
@@ -186,14 +192,23 @@ export function TournamentFormScreen({ route, navigation }: Props) {
     }));
   }
 
+  function handleVisibilityChange(visibility: TournamentVisibility) {
+    setValues((prev) => ({
+      ...prev,
+      visibility,
+      // Private tournaments gate registration behind an 8-digit code;
+      // prefill one so organizers can just share it (still editable).
+      accessCode: visibility === 'private' && !prev.accessCode ? generateAccessCode() : prev.accessCode,
+    }));
+  }
+
   function goNext() {
     const validationErrors = validateTournamentForm(values, timezoneOptions);
     const fieldsByStep: (keyof TournamentFormValues)[][] = [
-      ['name'],
+      ['name', 'accessCode'],
       ['gameId', 'countryId', 'timezone'],
       ['startAt', 'endAt', 'registrationOpensAt', 'registrationClosesAt'],
       ['format', 'capacity'],
-      [],
       [],
     ];
     const currentStepFields = fieldsByStep[step];
@@ -204,6 +219,13 @@ export function TournamentFormScreen({ route, navigation }: Props) {
     setErrors(stepErrors);
     if (Object.keys(stepErrors).length > 0) return;
     setStep((current) => Math.min(current + 1, steps.length - 1));
+  }
+
+  function handleDiscard() {
+    Alert.alert('Discard tournament', 'Everything you entered will be lost. Are you sure?', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() },
+    ]);
   }
 
   function goBack() {
@@ -239,12 +261,13 @@ export function TournamentFormScreen({ route, navigation }: Props) {
         registration_opens_at: parseLocalDateTime(values.registrationOpensAt),
         registration_closes_at: parseLocalDateTime(values.registrationClosesAt),
         visibility: values.visibility,
+        access_code: values.visibility === 'private' ? values.accessCode.trim() : null,
         scope: values.scope,
         format: values.format.trim(),
         capacity: Number(values.capacity),
         rules: values.rules.trim() || null,
         requirements: values.requirements.trim() || null,
-        prizes: values.prizes.trim() || null,
+        prizes: values.hasPrize ? values.prizes.trim() || null : null,
         status: status === 'keep' ? (existingStatus as 'draft') : status,
       };
 
@@ -318,6 +341,18 @@ export function TournamentFormScreen({ route, navigation }: Props) {
       <ScrollView className="flex-1" contentContainerClassName="px-5 pb-8 pt-4" keyboardShouldPersistTaps="handled">
         {step === 0 ? (
           <Card className="gap-4 p-5">
+            <Select
+              label="Visibility"
+              onChange={handleVisibilityChange}
+              options={visibilityOptions}
+              value={values.visibility}
+            />
+            <Select
+              label="Tournament type"
+              onChange={handleVisibilityChange}
+              options={tournamentTypeOptions}
+              value={values.visibility}
+            />
             <Input
               error={errors.name}
               label="Tournament name"
@@ -339,6 +374,18 @@ export function TournamentFormScreen({ route, navigation }: Props) {
               placeholder="https://..."
               value={values.imageUri}
             />
+            {values.visibility === 'private' ? (
+              <Input
+                error={errors.accessCode}
+                hint="Players must enter this code to register. Share it only with invited players."
+                keyboardType="number-pad"
+                label="Access code"
+                maxLength={8}
+                onChangeText={(text) => update('accessCode', text.replace(/[^0-9]/g, ''))}
+                placeholder="8 digits"
+                value={values.accessCode}
+              />
+            ) : null}
           </Card>
         ) : null}
 
@@ -359,6 +406,14 @@ export function TournamentFormScreen({ route, navigation }: Props) {
               options={countries.map((country) => ({ label: country.name, value: country.id }))}
               placeholder="Select a country"
               value={values.countryId}
+            />
+            <Select
+              disabled={!selectedCountry}
+              label="Scope"
+              onChange={(value) => update('scope', value)}
+              options={scopeOptions}
+              placeholder={selectedCountry ? 'Select a scope' : 'Select a country first'}
+              value={values.scope}
             />
             <Select
               error={errors.timezone}
@@ -427,11 +482,6 @@ export function TournamentFormScreen({ route, navigation }: Props) {
               placeholder="16"
               value={values.capacity}
             />
-          </Card>
-        ) : null}
-
-        {step === 4 ? (
-          <Card className="gap-4 p-5">
             <Input
               label="Rules (optional)"
               multiline
@@ -446,43 +496,42 @@ export function TournamentFormScreen({ route, navigation }: Props) {
               placeholder="Minimum rank, account age, hardware..."
               value={values.requirements}
             />
-            <Input
-              label="Prizes (optional)"
-              multiline
-              onChangeText={(text) => update('prizes', text)}
-              placeholder="What winners receive"
-              value={values.prizes}
-            />
             <Select
-              label="Visibility"
-              onChange={(value) => update('visibility', value)}
-              options={visibilityOptions}
-              value={values.visibility}
+              label="Are there prizes?"
+              onChange={(value) => update('hasPrize', value === 'yes')}
+              options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }]}
+              value={values.hasPrize ? 'yes' : 'no'}
             />
-            <Select
-              label="Scope"
-              onChange={(value) => update('scope', value)}
-              options={scopeOptions}
-              value={values.scope}
-            />
+            {values.hasPrize ? (
+              <Input
+                label="Prizes"
+                multiline
+                onChangeText={(text) => update('prizes', text)}
+                placeholder="What winners receive"
+                value={values.prizes}
+              />
+            ) : null}
           </Card>
         ) : null}
 
-        {step === 5 ? (
+        {step === 4 ? (
           <View className="gap-4">
             <Card className="gap-3 p-5">
               <Text className="text-lg font-bold text-[#17231f]">{values.name || 'Untitled tournament'}</Text>
               {values.description ? <Text className="text-sm leading-5 text-[#4d5d55]">{values.description}</Text> : null}
               <ReviewRow label="Game" value={games.find((game) => game.id === values.gameId)?.name ?? '—'} />
               <ReviewRow label="Country" value={countries.find((country) => country.id === values.countryId)?.name ?? '—'} />
+              <ReviewRow label="Scope" value={scopeOptions.find((option) => option.value === values.scope)?.label ?? ''} />
               <ReviewRow label="Timezone" value={values.timezone} />
+              <ReviewRow label="Registration opens" value={values.registrationOpensAt || 'Not set'} />
+              <ReviewRow label="Registration closes" value={values.registrationClosesAt || 'Not set'} />
               <ReviewRow label="Starts" value={values.startAt || '—'} />
               <ReviewRow label="Ends" value={values.endAt || 'Not set'} />
-              <ReviewRow label="Registration window" value={values.registrationOpensAt || values.registrationClosesAt ? `${values.registrationOpensAt || '—'} to ${values.registrationClosesAt || '—'}` : 'Not set'} />
               <ReviewRow label="Format" value={formatOptions.find((option) => option.value === values.format)?.label ?? values.format} />
               <ReviewRow label="Capacity" value={values.capacity || '—'} />
+              <ReviewRow label="Tournament type" value={tournamentTypeOptions.find((option) => option.value === values.visibility)?.label ?? '—'} />
               <ReviewRow label="Visibility" value={visibilityOptions.find((option) => option.value === values.visibility)?.label ?? ''} />
-              <ReviewRow label="Scope" value={scopeOptions.find((option) => option.value === values.scope)?.label ?? ''} />
+              {values.visibility === 'private' ? <ReviewRow label="Access code" value={values.accessCode || '—'} /> : null}
             </Card>
 
             {submitError ? (
@@ -500,9 +549,18 @@ export function TournamentFormScreen({ route, navigation }: Props) {
                 <Button loading={isSubmitting} onPress={() => void handleSave('draft')} variant="secondary">
                   Save as draft
                 </Button>
-                <Button loading={isSubmitting} onPress={() => void handleSave('published')}>
-                  Publish
-                </Button>
+                <View className="flex-row gap-3">
+                  <View className="flex-1">
+                    <Button onPress={handleDiscard} variant="danger">
+                      Discard
+                    </Button>
+                  </View>
+                  <View className="flex-1">
+                    <Button loading={isSubmitting} onPress={() => void handleSave('published')}>
+                      Publish
+                    </Button>
+                  </View>
+                </View>
               </View>
             )}
           </View>

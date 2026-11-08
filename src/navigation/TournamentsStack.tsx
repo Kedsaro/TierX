@@ -4,6 +4,7 @@ import { BracketScreen } from '../screens/events/BracketScreen';
 import { EventDetailScreen } from '../screens/events/EventDetailScreen';
 import { TournamentDetailScreen } from '../screens/tournaments/TournamentDetailScreen';
 import { TournamentFormScreen } from '../screens/tournaments/TournamentFormScreen';
+import { ManageParticipantsScreen } from '../screens/tournaments/ManageParticipantsScreen';
 import type { TournamentsStackParamList } from './tournaments/types';
 
 const Stack = createNativeStackNavigator<TournamentsStackParamList>();
@@ -25,6 +26,7 @@ export function TournamentsStack() {
       <Stack.Screen name="TournamentsMain" component={TournamentsScreen} />
       <Stack.Screen name="TournamentDetail" component={TournamentDetailScreen} />
       <Stack.Screen name="TournamentForm" component={TournamentFormScreen} />
+      <Stack.Screen name="ManageParticipants" component={ManageParticipantsScreen} />
       <Stack.Screen name="EventDetail" component={EventDetailScreen} />
       <Stack.Screen name="Bracket" component={BracketScreen} />
     </Stack.Navigator>

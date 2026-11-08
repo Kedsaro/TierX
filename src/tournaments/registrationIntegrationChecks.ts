@@ -23,7 +23,7 @@ export async function runRegistrationIntegrationChecks(db: SQLiteDatabase): Prom
     throw new Error('Baseline catalog is required for registration checks.');
   }
 
-  const suffix = `${Date.now()}`;
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const userIds: number[] = [];
   const playerIds: number[] = [];
   let openTournamentId: number | null = null;

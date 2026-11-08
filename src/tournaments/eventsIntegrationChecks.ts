@@ -30,7 +30,7 @@ export async function runEventsIntegrationChecks(db: SQLiteDatabase): Promise<vo
     throw new Error('Baseline catalog is required for events/bracket checks.');
   }
 
-  const suffix = `${Date.now()}`;
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const userIds: number[] = [];
   const playerIds: number[] = [];
   let tournamentId: number | null = null;

@@ -50,6 +50,10 @@ export function useTournaments(options: UseTournamentsOptions = {}) {
     let isCurrent = true;
     const parsedFilters = JSON.parse(serializedFilters) as TournamentFilters;
 
+    // Keep the loading flag up for the whole round-trip so the UI never
+    // renders a stale "no results" state while a new query is in flight.
+    setIsLoading(true);
+    setError(null);
     fetchTournaments(db, mode, followedByPlayerId, parsedFilters).then(
       (rows) => {
         if (isCurrent) {

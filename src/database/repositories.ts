@@ -5,7 +5,8 @@ import type { CreateMatchInput, CreateStageInput, Match, MatchDetails, MatchStat
 import type { CreatePlayerInput, Player, Ranking, RankingWithPlayer, UpdatePlayerInput } from '../types/player';
 import type { MatchHistoryItem, PlayerRankSummary, ProfileStats, UserPreferences } from '../types/profile';
 import type { AppNotification, AppSetting, AuditLogEntry, AuditLogSummary, ReportStatus, ReportSummary } from '../types/admin';
-import type { Registration } from '../types/registration';
+import { ACTIVE_REGISTRATION_STATUSES } from '../types/registration';
+import type { Registration, RegistrationStatus } from '../types/registration';
 import type {
   CreateTournamentInput,
   Tournament,
@@ -260,8 +261,10 @@ export const profileRepository = {
       userId,
     );
     const participating = await db.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM registrations
-       WHERE player_id = ? AND status IN ('pending', 'registered', 'waitlisted')`,
+      `SELECT COUNT(*) AS count FROM registrations r
+       JOIN tournaments t ON t.id = r.tournament_id
+       WHERE r.player_id = ? AND r.status IN ('pending', 'registered', 'waitlisted')
+         AND t.status = 'ongoing'`,
       playerId,
     );
     const record = await db.getFirstAsync<{ wins: number | null; losses: number | null }>(
@@ -303,7 +306,8 @@ export const profileRepository = {
         pr.display_name AS referee_name,
         t.id AS tournament_id,
         t.name AS tournament_name,
-        g.name AS game_name
+        g.name AS game_name,
+        mpo.eliminated AS own_eliminated
        FROM matches m
        JOIN stages s ON s.id = m.stage_id
        JOIN tournaments t ON t.id = s.tournament_id
@@ -312,9 +316,14 @@ export const profileRepository = {
        LEFT JOIN players p2 ON p2.id = m.player_two_id
        LEFT JOIN players pw ON pw.id = m.winner_id
        LEFT JOIN players pr ON pr.id = m.referee_id
-       WHERE (m.player_one_id = ? OR m.player_two_id = ?) AND m.status = 'completed'
+       LEFT JOIN match_participants mpo ON mpo.match_id = m.id AND mpo.player_id = ?
+       WHERE (m.player_one_id = ? OR m.player_two_id = ?
+            OR EXISTS (SELECT 1 FROM match_participants mp WHERE mp.match_id = m.id AND mp.player_id = ?))
+         AND m.status = 'completed'
        ORDER BY m.id DESC
        LIMIT ?`,
+      playerId,
+      playerId,
       playerId,
       playerId,
       limit,
@@ -328,8 +337,8 @@ export const tournamentRepository = {
       `INSERT INTO tournaments (
         name, description, image_uri, game_id, country_id, organizer_id, timezone,
         start_at, end_at, registration_opens_at, registration_closes_at, visibility,
-        scope, format, capacity, rules, requirements, prizes, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        access_code, city, scope, format, capacity, rules, requirements, prizes, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       input.name.trim(),
       input.description ?? null,
       input.image_uri ?? null,
@@ -342,7 +351,9 @@ export const tournamentRepository = {
       input.registration_opens_at ?? null,
       input.registration_closes_at ?? null,
       input.visibility ?? 'public',
-      input.scope ?? 'local',
+      input.access_code ?? null,
+      input.city ?? null,
+      input.scope ?? 'national',
       input.format.trim(),
       input.capacity,
       input.rules ?? null,
@@ -386,6 +397,18 @@ export const tournamentRepository = {
     }
     if (filters.excludeDraft) {
       conditions.push("t.status != 'draft'");
+    }
+    if (filters.registrationOpen) {
+      const now = new Date().toISOString();
+      conditions.push("t.status = 'published'");
+      conditions.push('(t.registration_opens_at IS NULL OR t.registration_opens_at <= ?)');
+      values.push(now);
+      conditions.push('COALESCE(t.registration_closes_at, t.start_at) >= ?');
+      values.push(now);
+      conditions.push(`(
+        SELECT COUNT(*) FROM registrations r
+        WHERE r.tournament_id = t.id AND r.status IN ('pending', 'registered', 'waitlisted')
+      ) < t.capacity`);
     }
     if (filters.visibility) {
       conditions.push('t.visibility = ?');
@@ -486,13 +509,13 @@ export const tournamentRepository = {
       `UPDATE tournaments SET
         name = ?, description = ?, image_uri = ?, game_id = ?, country_id = ?, organizer_id = ?,
         timezone = ?, start_at = ?, end_at = ?, registration_opens_at = ?, registration_closes_at = ?,
-        visibility = ?, scope = ?, format = ?, capacity = ?, rules = ?, requirements = ?, prizes = ?,
+        visibility = ?, access_code = ?, city = ?, scope = ?, format = ?, capacity = ?, rules = ?, requirements = ?, prizes = ?,
         status = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       input.name.trim(), input.description ?? null, input.image_uri ?? null, input.game_id,
       input.country_id, input.organizer_id, input.timezone.trim(), input.start_at, input.end_at ?? null,
       input.registration_opens_at ?? null, input.registration_closes_at ?? null,
-      input.visibility ?? 'public', input.scope ?? 'local', input.format.trim(), input.capacity,
+      input.visibility ?? 'public', input.access_code ?? null, input.city ?? null, input.scope ?? 'national', input.format.trim(), input.capacity,
       input.rules ?? null, input.requirements ?? null, input.prizes ?? null, input.status ?? 'draft', id,
     );
   },
@@ -571,6 +594,18 @@ export const rankingRepository = {
     );
   },
 
+  /** +1 win — only awarded to the definitive tournament winner (last survivor). */
+  async recordWin(db: SQLiteDatabase, gameId: number, playerId: number): Promise<void> {
+    await db.runAsync('INSERT OR IGNORE INTO rankings (player_id, game_id) VALUES (?, ?)', playerId, gameId);
+    await db.runAsync('UPDATE rankings SET wins = wins + 1, updated_at = CURRENT_TIMESTAMP WHERE player_id = ? AND game_id = ?', playerId, gameId);
+  },
+
+  /** +1 loss — applied the moment a player is eliminated from a tournament. */
+  async recordLoss(db: SQLiteDatabase, gameId: number, playerId: number): Promise<void> {
+    await db.runAsync('INSERT OR IGNORE INTO rankings (player_id, game_id) VALUES (?, ?)', playerId, gameId);
+    await db.runAsync('UPDATE rankings SET losses = losses + 1, updated_at = CURRENT_TIMESTAMP WHERE player_id = ? AND game_id = ?', playerId, gameId);
+  },
+
   async delete(db: SQLiteDatabase, id: number): Promise<void> {
     await db.runAsync('DELETE FROM rankings WHERE id = ?', id);
   },
@@ -612,8 +647,48 @@ export const registrationRepository = {
    * Registers (or re-registers, if a previous row was cancelled/rejected) a
    * player for a tournament. `tournament_id` + `player_id` is unique, so a
    * second registration reactivates the existing row instead of failing.
+   *
+   * Enforces the same rules as `evaluateRegistrationEligibility`: the
+   * tournament must be published, inside its registration window and under
+   * capacity. An already-active registration by the same player is always
+   * allowed (it reactivates their own row without consuming a new slot).
    */
   async register(db: SQLiteDatabase, tournamentId: number, playerId: number): Promise<void> {
+    const tournament = await tournamentRepository.getById(db, tournamentId);
+    if (!tournament) throw new Error('Tournament not found.');
+    if (tournament.status !== 'published') {
+      throw new Error('This tournament is not currently open for registration.');
+    }
+
+    const now = new Date().toISOString();
+    if (tournament.registration_opens_at && now < tournament.registration_opens_at) {
+      throw new Error('Registration has not opened yet.');
+    }
+    const registrationClosesAt = tournament.registration_closes_at ?? tournament.start_at;
+    if (now > registrationClosesAt) {
+      throw new Error('The registration period for this tournament has closed.');
+    }
+
+    const existing = await registrationRepository.getForPlayer(db, tournamentId, playerId);
+    // Organizer-removed registrations are marked 'rejected' and block re-entry;
+    // a self-cancelled player keeps the right to re-register.
+    if (existing?.status === 'rejected') {
+      throw new Error('You were removed from this tournament and cannot register again.');
+    }
+    const alreadyActive = existing !== null && ACTIVE_REGISTRATION_STATUSES.includes(existing.status);
+    if (!alreadyActive && (await registrationRepository.countActive(db, tournamentId)) >= tournament.capacity) {
+      throw new Error('This tournament has reached its capacity.');
+    }
+
+    await registrationRepository.registerUnchecked(db, tournamentId, playerId);
+  },
+
+  /**
+   * Same upsert as `register` but without the eligibility guard — for seeds,
+   * fixtures and admin tooling that legitimately write registrations into
+   * ongoing/closed tournaments.
+   */
+  async registerUnchecked(db: SQLiteDatabase, tournamentId: number, playerId: number): Promise<void> {
     await db.runAsync(
       `INSERT INTO registrations (tournament_id, player_id, status, registered_at)
        VALUES (?, ?, 'registered', CURRENT_TIMESTAMP)
@@ -627,6 +702,38 @@ export const registrationRepository = {
   async cancel(db: SQLiteDatabase, tournamentId: number, playerId: number): Promise<void> {
     await db.runAsync(
       "UPDATE registrations SET status = 'cancelled' WHERE tournament_id = ? AND player_id = ?",
+      tournamentId,
+      playerId,
+    );
+  },
+
+  /** All registrations for a tournament (any status) with player names — for organizer management. */
+  listForTournament(db: SQLiteDatabase, tournamentId: number): Promise<(Registration & { display_name: string; user_id: number | null })[]> {
+    return db.getAllAsync<Registration & { display_name: string; user_id: number | null }>(
+      `SELECT r.*, p.display_name, p.user_id
+       FROM registrations r
+       JOIN players p ON p.id = r.player_id
+       WHERE r.tournament_id = ?
+       ORDER BY r.registered_at ASC`,
+      tournamentId,
+    );
+  },
+
+  /** Tournament ids where this player's registration was rejected/removed — used to flag banned entries in listings. */
+  listRejectedTournamentIds(db: SQLiteDatabase, playerId: number): Promise<number[]> {
+    return db
+      .getAllAsync<{ tournament_id: number }>(
+        "SELECT tournament_id FROM registrations WHERE player_id = ? AND status = 'rejected'",
+        playerId,
+      )
+      .then((rows) => rows.map((row) => row.tournament_id));
+  },
+
+  /** Directly sets a registration's status — organizer management (approve, reject, remove, readmit). */
+  async setStatus(db: SQLiteDatabase, tournamentId: number, playerId: number, status: RegistrationStatus): Promise<void> {
+    await db.runAsync(
+      'UPDATE registrations SET status = ? WHERE tournament_id = ? AND player_id = ?',
+      status,
       tournamentId,
       playerId,
     );
@@ -667,6 +774,15 @@ export const notificationRepository = {
     );
   },
 
+  /** Unread notifications of a single type — e.g. pending removal alerts to surface at login. */
+  listUnreadByType(db: SQLiteDatabase, userId: number, type: string): Promise<AppNotification[]> {
+    return db.getAllAsync<AppNotification>(
+      'SELECT * FROM notifications WHERE user_id = ? AND type = ? AND read_at IS NULL ORDER BY id DESC',
+      userId,
+      type,
+    );
+  },
+
   async unreadCount(db: SQLiteDatabase, userId: number): Promise<number> {
     const row = await db.getFirstAsync<{ count: number }>(
       'SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read_at IS NULL',
@@ -681,6 +797,11 @@ export const notificationRepository = {
 
   async markAllRead(db: SQLiteDatabase, userId: number): Promise<void> {
     await db.runAsync('UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE user_id = ? AND read_at IS NULL', userId);
+  },
+
+  /** Permanently removes every notification of the user — the trash action on the profile feed. */
+  async deleteAllForUser(db: SQLiteDatabase, userId: number): Promise<void> {
+    await db.runAsync('DELETE FROM notifications WHERE user_id = ?', userId);
   },
 };
 
@@ -900,6 +1021,11 @@ export const stageRepository = {
   async delete(db: SQLiteDatabase, id: number): Promise<void> {
     await db.runAsync('DELETE FROM stages WHERE id = ?', id);
   },
+
+  /** Closes a stage — no more rounds/matches can be added to it. */
+  async close(db: SQLiteDatabase, id: number): Promise<void> {
+    await db.runAsync('UPDATE stages SET closed = 1 WHERE id = ?', id);
+  },
 };
 
 const matchDetailsSelect = `
@@ -907,7 +1033,10 @@ const matchDetailsSelect = `
     p1.display_name AS player_one_name,
     p2.display_name AS player_two_name,
     pw.display_name AS winner_name,
-    pr.display_name AS referee_name
+    pr.display_name AS referee_name,
+    (SELECT GROUP_CONCAT(mp.player_id) FROM match_participants mp WHERE mp.match_id = m.id ORDER BY mp.position) AS participant_ids_raw,
+    (SELECT GROUP_CONCAT(pp.display_name, '|') FROM match_participants mp JOIN players pp ON pp.id = mp.player_id WHERE mp.match_id = m.id ORDER BY mp.position) AS participant_names_raw,
+    (SELECT GROUP_CONCAT(mp.player_id) FROM match_participants mp WHERE mp.match_id = m.id AND mp.eliminated = 1 ORDER BY mp.position) AS eliminated_ids_raw
   FROM matches m
   LEFT JOIN players p1 ON p1.id = m.player_one_id
   LEFT JOIN players p2 ON p2.id = m.player_two_id
@@ -915,9 +1044,26 @@ const matchDetailsSelect = `
   LEFT JOIN players pr ON pr.id = m.referee_id
 `;
 
+type MatchDetailsRow = MatchDetails & {
+  participant_ids_raw: string | null;
+  participant_names_raw: string | null;
+  eliminated_ids_raw: string | null;
+};
+
+/** Converts the aggregated participant columns into typed arrays. */
+function hydrateMatchDetails(row: MatchDetailsRow): MatchDetails {
+  const { participant_ids_raw, participant_names_raw, eliminated_ids_raw, ...match } = row;
+  return {
+    ...match,
+    participant_ids: participant_ids_raw ? participant_ids_raw.split(',').map(Number) : [],
+    participant_names: participant_names_raw ? participant_names_raw.split('|') : [],
+    eliminated_ids: eliminated_ids_raw ? eliminated_ids_raw.split(',').map(Number) : [],
+  };
+}
+
 export const matchRepository = {
-  create(db: SQLiteDatabase, input: CreateMatchInput): Promise<number> {
-    return db.runAsync(
+  async create(db: SQLiteDatabase, input: CreateMatchInput): Promise<number> {
+    const matchId = await db.runAsync(
       `INSERT INTO matches (stage_id, round_number, match_number, player_one_id, player_two_id, scheduled_at, referee_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       input.stage_id,
@@ -928,21 +1074,32 @@ export const matchRepository = {
       input.scheduled_at ?? null,
       input.referee_id ?? null,
     ).then((result) => result.lastInsertRowId);
+    for (const [position, playerId] of (input.participant_ids ?? []).entries()) {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO match_participants (match_id, player_id, position) VALUES (?, ?, ?)',
+        matchId,
+        playerId,
+        position,
+      );
+    }
+    return matchId;
   },
 
   getById(db: SQLiteDatabase, id: number): Promise<Match | null> {
     return db.getFirstAsync<Match>('SELECT * FROM matches WHERE id = ?', id);
   },
 
-  getDetails(db: SQLiteDatabase, id: number): Promise<MatchDetails | null> {
-    return db.getFirstAsync<MatchDetails>(`${matchDetailsSelect} WHERE m.id = ?`, id);
+  async getDetails(db: SQLiteDatabase, id: number): Promise<MatchDetails | null> {
+    const row = await db.getFirstAsync<MatchDetailsRow>(`${matchDetailsSelect} WHERE m.id = ?`, id);
+    return row ? hydrateMatchDetails(row) : null;
   },
 
-  listByStage(db: SQLiteDatabase, stageId: number): Promise<MatchDetails[]> {
-    return db.getAllAsync<MatchDetails>(
+  async listByStage(db: SQLiteDatabase, stageId: number): Promise<MatchDetails[]> {
+    const rows = await db.getAllAsync<MatchDetailsRow>(
       `${matchDetailsSelect} WHERE m.stage_id = ? ORDER BY m.round_number ASC, m.match_number ASC`,
       stageId,
     );
+    return rows.map(hydrateMatchDetails);
   },
 
   /** Matches across every stage of a tournament, optionally filtered by status (e.g. the "current matches" of an active event). */
@@ -953,18 +1110,18 @@ export const matchRepository = {
       conditions.push(`m.status IN (${statuses.map(() => '?').join(', ')})`);
       values.push(...statuses);
     }
-    return db.getAllAsync<MatchDetails>(
+    return db.getAllAsync<MatchDetailsRow>(
       `${matchDetailsSelect}
        JOIN stages s ON s.id = m.stage_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY (m.scheduled_at IS NULL), m.scheduled_at ASC, s.position ASC, m.round_number ASC, m.match_number ASC`,
       values,
-    );
+    ).then((rows) => rows.map(hydrateMatchDetails));
   },
 
   /** The last completed match of a tournament (highest stage/round), used to surface the overall winner once it finishes. */
-  getFinalForTournament(db: SQLiteDatabase, tournamentId: number): Promise<MatchDetails | null> {
-    return db.getFirstAsync<MatchDetails>(
+  async getFinalForTournament(db: SQLiteDatabase, tournamentId: number): Promise<MatchDetails | null> {
+    const row = await db.getFirstAsync<MatchDetailsRow>(
       `${matchDetailsSelect}
        JOIN stages s ON s.id = m.stage_id
        WHERE s.tournament_id = ? AND m.status = 'completed'
@@ -972,6 +1129,7 @@ export const matchRepository = {
        LIMIT 1`,
       tournamentId,
     );
+    return row ? hydrateMatchDetails(row) : null;
   },
 
   /** Assigns/updates participants, schedule and referee without touching the result (RF-12). */
@@ -988,6 +1146,54 @@ export const matchRepository = {
       input.referee_id,
       id,
     );
+  },
+
+  /** Replaces every participant of a multi-player match (round matches host N players). */
+  async replaceParticipants(db: SQLiteDatabase, id: number, playerIds: number[]): Promise<void> {
+    await db.runAsync('DELETE FROM match_participants WHERE match_id = ?', id);
+    for (const [position, playerId] of playerIds.entries()) {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO match_participants (match_id, player_id, position) VALUES (?, ?, ?)',
+        id,
+        playerId,
+        position,
+      );
+    }
+  },
+
+  /** Marks the given participants as eliminated in a multi-player match. */
+  async markEliminated(db: SQLiteDatabase, id: number, playerIds: number[]): Promise<void> {
+    await db.runAsync('UPDATE match_participants SET eliminated = 0 WHERE match_id = ?', id);
+    for (const playerId of playerIds) {
+      await db.runAsync(
+        'UPDATE match_participants SET eliminated = 1 WHERE match_id = ? AND player_id = ?',
+        id,
+        playerId,
+      );
+    }
+  },
+
+  /** Players eliminated anywhere in a tournament (multi-player flag plus 1v1 losers) — they cannot be picked for later rounds. */
+  listEliminatedPlayerIds(db: SQLiteDatabase, tournamentId: number): Promise<number[]> {
+    return db.getAllAsync<{ player_id: number }>(
+      `SELECT DISTINCT mp.player_id
+         FROM match_participants mp
+         JOIN matches m ON m.id = mp.match_id
+         JOIN stages s ON s.id = m.stage_id
+        WHERE s.tournament_id = ? AND mp.eliminated = 1
+       UNION
+       SELECT DISTINCT CASE WHEN m.winner_id = m.player_one_id THEN m.player_two_id ELSE m.player_one_id END
+         FROM matches m
+         JOIN stages s ON s.id = m.stage_id
+        WHERE s.tournament_id = ? AND m.status = 'completed' AND m.winner_id IS NOT NULL`,
+      tournamentId,
+      tournamentId,
+    ).then((rows) => rows.map((row) => row.player_id).filter((id): id is number => id != null));
+  },
+
+  /** Stores the organizer's round details message on the match. */
+  async setDetails(db: SQLiteDatabase, id: number, details: string | null): Promise<void> {
+    await db.runAsync('UPDATE matches SET details = ? WHERE id = ?', details, id);
   },
 
   async markOngoing(db: SQLiteDatabase, id: number): Promise<void> {

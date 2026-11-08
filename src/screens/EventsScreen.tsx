@@ -13,6 +13,7 @@ import { Modal } from '../components/ui/Modal';
 import { useAuth } from '../auth/AuthProvider';
 import { useCurrentPlayer } from '../hooks/useCurrentPlayer';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
+import { useRejectedTournamentIds } from '../hooks/useRejectedTournamentIds';
 import { useTournaments } from '../hooks/useTournaments';
 import type { EventsStackParamList } from '../navigation/events/types';
 
@@ -43,8 +44,6 @@ const statusFilters: { label: string; value: TournamentStatus | undefined }[] = 
 
 const scopeFilters: { label: string; value: TournamentScope | undefined }[] = [
   { label: 'All scopes', value: undefined },
-  { label: 'Local', value: 'local' },
-  { label: 'Regional', value: 'regional' },
   { label: 'National', value: 'national' },
   { label: 'International', value: 'international' },
 ];
@@ -52,6 +51,7 @@ const scopeFilters: { label: string; value: TournamentScope | undefined }[] = [
 export function EventsScreen({ navigation }: Props) {
   const { user } = useAuth();
   const { player } = useCurrentPlayer();
+  const bannedIds = useRejectedTournamentIds();
   const [segment, setSegment] = useState<Segment>('organized');
   const [search, setSearch] = useState('');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -169,6 +169,7 @@ export function EventsScreen({ navigation }: Props) {
         <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerClassName="pb-6">
           {organizedSectionMeta.map((section) => (
             <Collection
+              bannedIds={bannedIds}
               emptyLabel={hasActiveQuery ? `No ${section.title.toLowerCase()} tournaments match these criteria.` : section.emptyLabel}
               icon={section.icon}
               key={section.key}
@@ -232,12 +233,14 @@ function Collection({
   tournaments,
   emptyLabel,
   onPressTournament,
+  bannedIds,
 }: {
   title: string;
   icon: React.ReactNode;
   tournaments: TournamentSummary[];
   emptyLabel: string;
   onPressTournament: (tournament: TournamentSummary) => void;
+  bannedIds?: Set<number>;
 }) {
   return (
     <View className="mt-6 first:mt-0">
@@ -254,6 +257,7 @@ function Collection({
           {tournaments.map((tournament) => (
             <View className="w-72" key={tournament.id}>
               <TournamentCard
+                banned={bannedIds?.has(tournament.id)}
                 countryName={tournament.country_name}
                 gameName={tournament.game_name}
                 onPress={() => onPressTournament(tournament)}

@@ -16,7 +16,7 @@ export function canManageTournament(
   return userId !== undefined && tournament.organizer_id === userId;
 }
 
-export type TournamentAction = 'edit' | 'publish' | 'unpublish' | 'cancel' | 'close';
+export type TournamentAction = 'edit' | 'publish' | 'unpublish' | 'cancel' | 'close' | 'start';
 
 /** Status transitions allowed from the organizer's management actions. */
 const allowedTransitions: Record<TournamentAction, { from: TournamentStatus[]; to: TournamentStatus } | null> = {
@@ -25,6 +25,9 @@ const allowedTransitions: Record<TournamentAction, { from: TournamentStatus[]; t
   unpublish: { from: ['published'], to: 'draft' },
   cancel: { from: ['draft', 'published', 'ongoing'], to: 'cancelled' },
   close: { from: ['published', 'ongoing'], to: 'completed' },
+  // "Start" lets the organizer flip a published tournament to ongoing ahead of
+  // its scheduled start_at — the end date stays untouched either way.
+  start: { from: ['published'], to: 'ongoing' },
 };
 
 export function availableActions(status: TournamentStatus): TournamentAction[] {
