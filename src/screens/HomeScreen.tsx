@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarDays, PlusCircle, Sparkles, Trophy } from 'lucide-react-native';
+import { Flag, Globe2, PlusCircle, Sparkles, Swords } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,9 +11,9 @@ import { TournamentCard } from '../components/tournaments/TournamentCard';
 import { RankingRow } from '../components/tournaments/RankingRow';
 import { Button } from '../components/ui/Button';
 import { FeedbackState } from '../components/ui/FeedbackState';
-import { Input } from '../components/ui/Input';
 import { useCurrentPlayer } from '../hooks/useCurrentPlayer';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
+import { useRejectedTournamentIds } from '../hooks/useRejectedTournamentIds';
 import { useTournaments } from '../hooks/useTournaments';
 import { rankingRepository, tournamentRepository } from '../database/repositories';
 import type { HomeStackParamList } from '../navigation/tournaments/types';
@@ -26,20 +26,14 @@ type Props = CompositeScreenProps<
   BottomTabScreenProps<RootTabParamList, 'Home'>
 >;
 
-function matchesSearch(tournament: Tournament, search: string): boolean {
-  if (!search) return true;
-  const query = search.toLowerCase();
-  return tournament.name.toLowerCase().includes(query) || (tournament.description ?? '').toLowerCase().includes(query);
-}
-
 export function HomeScreen({ navigation }: Props) {
   const db = useSQLiteContext();
   const { user } = useAuth();
   const { player } = useCurrentPlayer();
-  const [search, setSearch] = useState('');
+  const bannedIds = useRejectedTournamentIds();
 
-  const published = useTournaments({ status: 'published', visibility: 'public', limit: 30 });
-  const ongoing = useTournaments({ status: 'ongoing', visibility: 'public', limit: 10 });
+  const published = useTournaments({ registrationOpen: true, visibility: 'public', limit: 30 });
+  const competitiveFeed = useTournaments({ registrationOpen: true, visibility: 'private', limit: 5 });
 
   const [activity, setActivity] = useState<{ organizing: number; following: number } | null>(null);
   const [topRankings, setTopRankings] = useState<RankingWithPlayer[]>([]);
@@ -50,17 +44,19 @@ export function HomeScreen({ navigation }: Props) {
 
       tournamentRepository.list(db, { organizerId: user.id }).then((organized) => {
         if (isCurrent()) setActivity((prev) => ({ organizing: organized.length, following: prev?.following ?? 0 }));
-      });
+      }).catch(() => {});
 
       if (player) {
         tournamentRepository.listFollowed(db, player.id).then((followed) => {
-          if (isCurrent()) setActivity((prev) => ({ organizing: prev?.organizing ?? 0, following: followed.length }));
-        });
+          // Finished tournaments no longer count as "following".
+          const active = followed.filter((t) => t.status === 'published' || t.status === 'ongoing' || t.status === 'draft');
+          if (isCurrent()) setActivity((prev) => ({ organizing: prev?.organizing ?? 0, following: active.length }));
+        }).catch(() => {});
 
         if (player.favorite_game_id) {
           rankingRepository.listByGame(db, player.favorite_game_id).then((rows) => {
             if (isCurrent()) setTopRankings(rows.slice(0, 3));
-          });
+          }).catch(() => {});
         }
       }
     },
@@ -80,34 +76,34 @@ export function HomeScreen({ navigation }: Props) {
   // show up without requiring a manual reload.
   useRefreshOnFocus(() => {
     void published.refresh();
-    void ongoing.refresh();
+    void competitiveFeed.refresh();
     loadActivityAndRanking(() => true);
   });
 
+  const visibleTournaments = useMemo(
+    () => published.tournaments.filter((tournament) => !bannedIds.has(tournament.id)),
+    [published.tournaments, bannedIds],
+  );
   const canInterestYou = useMemo(
-    () => published.tournaments.filter((tournament) => matchesSearch(tournament, search)).slice(0, 10),
-    [published.tournaments, search],
+    () => visibleTournaments.slice(0, 5),
+    [visibleTournaments],
   );
-  const nearYou = useMemo(
-    () => canInterestYou.filter((tournament) => tournament.scope === 'local'),
-    [canInterestYou],
+  const national = useMemo(
+    () => visibleTournaments.filter((tournament) => tournament.scope === 'national').slice(0, 5),
+    [visibleTournaments],
   );
-  const competitive = useMemo(
-    () => canInterestYou.filter((tournament) => tournament.scope !== 'local'),
-    [canInterestYou],
+  const international = useMemo(
+    () => visibleTournaments.filter((tournament) => tournament.scope === 'international').slice(0, 5),
+    [visibleTournaments],
   );
-  const others = useMemo(
-    () => ongoing.tournaments.filter((tournament) => matchesSearch(tournament, search)),
-    [ongoing.tournaments, search],
+  const visibleCompetitive = useMemo(
+    () => competitiveFeed.tournaments.filter((tournament) => !bannedIds.has(tournament.id)),
+    [competitiveFeed.tournaments, bannedIds],
   );
-
   function openDetail(tournament: Tournament) {
     navigation.navigate('TournamentDetail', { tournamentId: tournament.id });
   }
 
-  function goToTournaments() {
-    navigation.getParent<BottomTabScreenProps<RootTabParamList>['navigation']>()?.navigate('Tournaments');
-  }
 
   return (
     <SafeAreaView className="flex-1 bg-[#f4f6f2]" edges={['top']}>
@@ -122,42 +118,17 @@ export function HomeScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <Input
-          accessibilityLabel="Search tournaments"
-          autoCapitalize="none"
-          onChangeText={setSearch}
-          onClear={() => setSearch('')}
-          placeholder="Tournament search"
-          returnKeyType="search"
-          search
-          value={search}
-        />
-
-        <View className="mt-4 flex-row gap-3">
-          <View className="flex-1">
-            <Button icon={<ArrowRight color="#176b5b" size={16} />} onPress={goToTournaments} variant="secondary">
-              Filters
-            </Button>
-          </View>
-          <View className="flex-1">
-            <Button icon={<PlusCircle color="#ffffff" size={16} />} onPress={() => navigation.navigate('TournamentForm', undefined)}>
-              Create event
-            </Button>
-          </View>
+        <View className="-mt-2 pb-4">
+          <Text className="text-xl text-[#4d5d55]">
+            Welcome back, <Text className="text-4xl font-bold text-[#17231f]">{player?.display_name ?? user?.username ?? 'player'}</Text>
+          </Text>
+          <Text className="text-xl text-[#4d5d55]">Are you ready to compete?</Text>
         </View>
 
-        <View className="mt-5 rounded-2xl bg-[#173d35] p-5">
-          <View className="flex-row items-center gap-2">
-            <Sparkles color="#f2bd56" size={17} />
-            <Text className="text-xs font-bold uppercase tracking-[1.5px] text-[#c7ddd3]">Tournament desk</Text>
-          </View>
-          <Text className="mt-4 text-2xl font-bold text-white">Make your next match count.</Text>
-          <Text className="mt-2 text-sm leading-5 text-[#d4e4dc]">
-            Keep local competitions, schedules and player rankings in one place.
-          </Text>
-          <View className="mt-5">
-            <Button onPress={goToTournaments} variant="secondary">
-              Explore tournaments
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <Button icon={<PlusCircle color="#ffffff" size={16} />} onPress={() => navigation.navigate('TournamentForm', undefined)}>
+              Create Tournament
             </Button>
           </View>
         </View>
@@ -189,28 +160,28 @@ export function HomeScreen({ navigation }: Props) {
           tournaments={canInterestYou}
         />
         <Collection
-          emptyLabel="No local tournaments right now."
-          icon={<CalendarDays color="#176b5b" size={18} />}
-          isLoading={published.isLoading}
-          onPressTournament={openDetail}
-          title="Near you"
-          tournaments={nearYou}
-        />
-        <Collection
-          emptyLabel="No regional, national or international tournaments right now."
-          icon={<Trophy color="#176b5b" size={18} />}
-          isLoading={published.isLoading}
+          emptyLabel="No competitive tournaments right now."
+          icon={<Swords color="#176b5b" size={18} />}
+          isLoading={competitiveFeed.isLoading}
           onPressTournament={openDetail}
           title="Competitive"
-          tournaments={competitive}
+          tournaments={visibleCompetitive}
         />
         <Collection
-          emptyLabel="No tournaments are currently in progress."
-          icon={<CalendarDays color="#176b5b" size={18} />}
-          isLoading={ongoing.isLoading}
+          emptyLabel="No national tournaments right now."
+          icon={<Flag color="#176b5b" size={18} />}
+          isLoading={published.isLoading}
           onPressTournament={openDetail}
-          title="Others"
-          tournaments={others}
+          title="National"
+          tournaments={national}
+        />
+        <Collection
+          emptyLabel="No international tournaments right now."
+          icon={<Globe2 color="#176b5b" size={18} />}
+          isLoading={published.isLoading}
+          onPressTournament={openDetail}
+          title="International"
+          tournaments={international}
         />
       </ScrollView>
     </SafeAreaView>

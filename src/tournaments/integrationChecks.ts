@@ -184,7 +184,7 @@ export async function runTournamentManagementIntegrationChecks(db: SQLiteDatabas
     throw new Error('Baseline catalog is required for tournament management checks.');
   }
 
-  const suffix = `${Date.now()}`;
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   let organizerId: number | null = null;
   let otherUserId: number | null = null;
   let tournamentId: number | null = null;

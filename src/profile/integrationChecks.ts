@@ -29,7 +29,7 @@ export async function runProfileIntegrationChecks(db: SQLiteDatabase): Promise<v
     throw new Error('Baseline catalog is required for profile checks.');
   }
 
-  const suffix = `${Date.now()}`;
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const userIds: number[] = [];
   const playerIds: number[] = [];
   let tournamentId: number | null = null;

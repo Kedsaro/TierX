@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native';
 
-type BadgeTone = 'neutral' | 'success' | 'warning' | 'danger' | 'accent';
+type BadgeTone = 'neutral' | 'success' | 'warning' | 'danger' | 'accent' | 'info' | 'dangerSolid';
 
 interface BadgeProps {
   label: string;
@@ -13,6 +13,8 @@ const toneClasses: Record<BadgeTone, string> = {
   warning: 'bg-[#fff1ce] text-[#785311]',
   danger: 'bg-[#f9e4e2] text-[#9b302b]',
   accent: 'bg-[#f7e8c5] text-[#604619]',
+  info: 'bg-[#197BC5] text-white',
+  dangerSolid: 'bg-[#A10D0D] text-white',
 };
 
 export function Badge({ label, tone = 'neutral' }: BadgeProps) {

@@ -8,6 +8,8 @@ interface ButtonProps {
   onPress: () => void;
   variant?: ButtonVariant;
   icon?: ReactNode;
+  /** Where the icon sits relative to the label. Defaults to 'left'. */
+  iconPosition?: 'left' | 'right';
   disabled?: boolean;
   loading?: boolean;
   accessibilityLabel?: string;
@@ -26,6 +28,7 @@ export function Button({
   onPress,
   variant = 'primary',
   icon,
+  iconPosition = 'left',
   disabled = false,
   loading = false,
   accessibilityLabel,
@@ -43,8 +46,9 @@ export function Button({
       disabled={unavailable}
       onPress={onPress}
     >
-      {loading ? <ActivityIndicator color={variant === 'secondary' || variant === 'quiet' ? '#176b5b' : '#ffffff'} /> : icon}
+      {loading ? <ActivityIndicator color={variant === 'secondary' || variant === 'quiet' ? '#176b5b' : '#ffffff'} /> : iconPosition === 'left' ? icon : null}
       <Text className={`text-sm font-bold ${styles.text}`}>{children}</Text>
+      {!loading && iconPosition === 'right' ? icon : null}
     </Pressable>
   );
 }

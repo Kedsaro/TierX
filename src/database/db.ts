@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { databaseKeyPragma, getDatabaseKey } from './encryption';
+import { runDemoSeedIfEmpty } from './demoSeed';
 import { DATABASE_VERSION, indexes, migrations } from './schema';
 
 // expo-sqlite caches and reuses the underlying native connection for a given
@@ -46,4 +47,8 @@ export async function initializeDatabase(db: SQLiteDatabase): Promise<void> {
 
   await db.execAsync(indexes);
   await db.execAsync('PRAGMA foreign_keys = ON;');
+
+  // First-run demo content: populates ghost users/tournaments/registrations
+  // on a clean install; a no-op once any account exists.
+  await runDemoSeedIfEmpty(db);
 }

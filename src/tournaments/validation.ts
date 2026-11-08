@@ -12,11 +12,13 @@ export interface TournamentFormValues {
   registrationOpensAt: string;
   registrationClosesAt: string;
   visibility: TournamentVisibility;
+  accessCode: string;
   scope: TournamentScope;
   format: string;
   capacity: string;
   rules: string;
   requirements: string;
+  hasPrize: boolean;
   prizes: string;
 }
 
@@ -35,11 +37,13 @@ export function emptyTournamentForm(): TournamentFormValues {
     registrationOpensAt: '',
     registrationClosesAt: '',
     visibility: 'public',
-    scope: 'local',
+    accessCode: '',
+    scope: 'national',
     format: 'single_elimination',
     capacity: '',
     rules: '',
     requirements: '',
+    hasPrize: false,
     prizes: '',
   };
 }
@@ -81,6 +85,14 @@ export function snapToFiveMinutes(date: Date): Date {
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+
+export const ACCESS_CODE_LENGTH = 8;
+const ACCESS_CODE_PATTERN = /^\d{8}$/;
+
+/** Random 8-digit join code for private tournaments. */
+export function generateAccessCode(): string {
+  return String(Math.floor(Math.random() * 100000000)).padStart(ACCESS_CODE_LENGTH, '0');
+}
 
 /**
  * Earliest instant the tournament itself (start/end) may be scheduled for:
@@ -181,6 +193,10 @@ export function validateTournamentForm(
     } else if (startAt && new Date(startAt).getTime() - new Date(closesAt).getTime() < ONE_DAY_MS) {
       errors.registrationClosesAt = 'Registration must close at least 24 hours (1 day) before the tournament starts.';
     }
+  }
+
+  if (values.visibility === 'private' && !ACCESS_CODE_PATTERN.test(values.accessCode.trim())) {
+    errors.accessCode = 'Private tournaments need an 8-digit access code.';
   }
 
   if (!values.format.trim()) {

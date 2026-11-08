@@ -9,20 +9,19 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
-import { useAuth } from '../auth/AuthProvider';
-import { useCurrentPlayer } from '../hooks/useCurrentPlayer';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
+import { useRejectedTournamentIds } from '../hooks/useRejectedTournamentIds';
 import { useTournaments } from '../hooks/useTournaments';
 import type { TournamentsStackParamList } from '../navigation/tournaments/types';
 
 type Props = NativeStackScreenProps<TournamentsStackParamList, 'TournamentsMain'>;
 
-type Segment = 'public' | 'mine' | 'following';
+type Segment = 'open' | 'private' | 'ongoing';
 
 const segments: { label: string; value: Segment }[] = [
-  { label: 'Public', value: 'public' },
-  { label: 'Mine', value: 'mine' },
-  { label: 'Following', value: 'following' },
+  { label: 'Open', value: 'open' },
+  { label: 'Private', value: 'private' },
+  { label: 'Ongoing', value: 'ongoing' },
 ];
 
 const statusFilters: { label: string; value: TournamentStatus | undefined }[] = [
@@ -35,8 +34,6 @@ const statusFilters: { label: string; value: TournamentStatus | undefined }[] = 
 
 const scopeFilters: { label: string; value: TournamentScope | undefined }[] = [
   { label: 'All scopes', value: undefined },
-  { label: 'Local', value: 'local' },
-  { label: 'Regional', value: 'regional' },
   { label: 'National', value: 'national' },
   { label: 'International', value: 'international' },
 ];
@@ -50,9 +47,7 @@ const dateFilters: { label: string; value: DateFilter }[] = [
 ];
 
 export function TournamentsScreen({ navigation }: Props) {
-  const { user } = useAuth();
-  const { player } = useCurrentPlayer();
-  const [segment, setSegment] = useState<Segment>('public');
+  const [segment, setSegment] = useState<Segment>('open');
   const [search, setSearch] = useState('');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [status, setStatus] = useState<TournamentStatus | undefined>();
@@ -64,17 +59,18 @@ export function TournamentsScreen({ navigation }: Props) {
 
   const now = new Date().toISOString();
   const { tournaments, isLoading, error, refresh } = useTournaments({
-    mode: segment === 'following' ? 'following' : 'list',
-    followedByPlayerId: player?.id,
+    mode: 'list',
     search: search.trim() || undefined,
-    status,
+    status: segment === 'ongoing' ? 'ongoing' : status,
     scope,
-    organizerId: segment === 'mine' ? user?.id : undefined,
-    visibility: segment === 'public' ? 'public' : undefined,
-    excludeDraft: segment === 'public',
+    visibility: segment === 'private' ? 'private' : 'public',
+    excludeDraft: segment === 'open',
+    registrationOpen: segment === 'open',
     startsAfter: dateFilter === 'upcoming' ? now : undefined,
     startsBefore: dateFilter === 'past' ? now : undefined,
   });
+
+  const bannedIds = useRejectedTournamentIds();
 
   // Refresh whenever this tab regains focus, so tournaments created or
   // joined elsewhere (e.g. via the dev seed tool, or after registering)
@@ -109,9 +105,9 @@ export function TournamentsScreen({ navigation }: Props) {
 
   const hasActiveQuery = Boolean(search.trim()) || activeFilterCount > 0;
   const emptyCopyBySegment: Record<Segment, { title: string; description: string }> = {
-    public: { title: 'Your tournament list is empty', description: 'Public, followed and organized tournaments will be collected here.' },
-    mine: { title: "You haven't organized any tournaments", description: 'Tournaments you create will appear here.' },
-    following: { title: "You're not following any tournaments", description: 'Register for a tournament to see it here.' },
+    open: { title: 'No tournaments open for registration', description: 'Public tournaments accepting registrations will appear here.' },
+    private: { title: 'No private tournaments', description: 'Invite-only private tournaments will appear here.' },
+    ongoing: { title: 'No tournaments in progress', description: 'Public tournaments currently in progress will appear here.' },
   };
 
   return (
@@ -191,6 +187,7 @@ export function TournamentsScreen({ navigation }: Props) {
       </View>
 
       <TournamentList
+        bannedIds={bannedIds}
         emptyDescription={hasActiveQuery ? 'No tournaments match these criteria. Clear your search or filters and try again.' : emptyCopyBySegment[segment].description}
         emptyTitle={hasActiveQuery ? 'No matching tournaments' : emptyCopyBySegment[segment].title}
         error={error}

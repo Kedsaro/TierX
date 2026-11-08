@@ -39,7 +39,11 @@ export async function runDatabaseIntegrationChecks(db: SQLiteDatabase): Promise<
     throw new Error('Baseline games/countries catalog was not seeded.');
   }
 
-  const suffix = `${Date.now()}`;
+  // A random component keeps concurrent dev-mode check runs (React's double
+  // effect invocation in the same millisecond) from colliding on the unique
+  // username/email/game/country keys.
+  const runId = Math.floor(Math.random() * 1e6);
+  const suffix = `${Date.now()}-${runId}`;
   let userId: number | null = null;
   let gameId: number | null = null;
   let countryId: number | null = null;
@@ -54,10 +58,23 @@ export async function runDatabaseIntegrationChecks(db: SQLiteDatabase): Promise<
       terms_accepted: true,
     });
     gameId = await gameRepository.create(db, `DB Check ${suffix}`, 'Integration');
-    countryId = await countryRepository.create(db, {
-      name: `Test Country ${suffix}`,
-      code: 'ZZ',
-    });
+    // The country code is globally unique and capped at 2 chars, so derive a
+    // per-run code from the suffix — parallel dev-mode check runs would
+    // otherwise collide on a hardcoded value and leak orphaned rows. A crashed
+    // check can still leave an orphan row behind, so retry with shifted codes
+    // until the insert lands on a free one.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        countryId = await countryRepository.create(db, {
+          name: `Test Country ${suffix}`,
+          code: ((runId + attempt) % 1296).toString(36).toUpperCase().padStart(2, 'Z'),
+        });
+        break;
+      } catch (cause) {
+        if (!(cause instanceof Error) || !cause.message.includes('UNIQUE')) throw cause;
+      }
+    }
+    if (countryId == null) throw new Error('Country insert check could not find a free code.');
     playerId = await playerRepository.create(db, {
       display_name: `DB Check Player ${suffix}`,
       user_id: userId,

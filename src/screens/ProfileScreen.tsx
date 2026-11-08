@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Bell, Database, MapPin, Pencil, ShieldCheck, Trash2, Trophy, UserRound } from 'lucide-react-native';
+import { Bell, Database, DoorOpen, Pencil, ShieldCheck, Trash2 } from 'lucide-react-native';
 import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useAuth } from '../auth/AuthProvider';
 import { RankingRow } from '../components/tournaments/RankingRow';
-import { TournamentCard } from '../components/tournaments/TournamentCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { FeedbackState } from '../components/ui/FeedbackState';
-import { countryRepository, gameRepository, notificationRepository, playerRepository, preferencesRepository, profileRepository, rankingRepository, tournamentRepository } from '../database/repositories';
+import { countryRepository, gameRepository, notificationRepository, playerRepository, preferencesRepository, profileRepository, rankingRepository } from '../database/repositories';
 import { isAdminRole } from '../tournaments/authorization';
 import type { AppNotification } from '../types/admin';
 import { useCurrentPlayer } from '../hooks/useCurrentPlayer';
@@ -20,7 +19,6 @@ import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 import type { ProfileStackParamList } from '../navigation/tournaments/types';
 import type { MatchHistoryItem, PlayerRankSummary, ProfileStats, UserPreferences } from '../types/profile';
 import type { Player, RankingWithPlayer } from '../types/player';
-import type { TournamentSummary } from '../types/tournament';
 import { clearAllTournaments, seedDemoTournaments } from '../utils/databaseCleanup';
 
 type ProfileNavigation = NativeStackNavigationProp<ProfileStackParamList, 'ProfileMain'>;
@@ -31,8 +29,6 @@ interface ProfileData {
   stats: ProfileStats | null;
   rank: PlayerRankSummary | null;
   leaderboard: RankingWithPlayer[];
-  created: TournamentSummary[];
-  participating: TournamentSummary[];
   history: MatchHistoryItem[];
   countryName: string | null;
   favoriteGameName: string | null;
@@ -50,12 +46,10 @@ export function ProfileScreen() {
 
   const fetchProfile = useCallback(async (): Promise<ProfileData> => {
     if (!user || !linkedPlayer) throw new Error('No signed-in player.');
-    const [player, preferences, stats, created, participating, history, countries, games, notifications, unreadCount] = await Promise.all([
+    const [player, preferences, stats, history, countries, games, notifications, unreadCount] = await Promise.all([
       playerRepository.getById(db, linkedPlayer.id),
       preferencesRepository.getForUser(db, user.id),
       profileRepository.getStats(db, user.id, linkedPlayer.id),
-      tournamentRepository.list(db, { organizerId: user.id }),
-      tournamentRepository.listFollowed(db, linkedPlayer.id),
       profileRepository.listMatchHistory(db, linkedPlayer.id),
       countryRepository.list(db),
       gameRepository.list(db),
@@ -77,8 +71,6 @@ export function ProfileScreen() {
       stats,
       rank,
       leaderboard: leaderboard.slice(0, 5),
-      created,
-      participating,
       history,
       countryName: countries.find((country) => country.id === player?.country_id)?.name ?? null,
       favoriteGameName: games.find((game) => game.id === favoriteGameId)?.name ?? null,
@@ -170,7 +162,7 @@ export function ProfileScreen() {
     );
   }
 
-  const { player, preferences, stats, rank, leaderboard, created, participating, history, countryName, favoriteGameName, notifications, unreadCount } = data;
+  const { player, preferences, stats, rank, leaderboard, history, countryName, favoriteGameName, notifications, unreadCount } = data;
   const winRate = stats.wins + stats.losses > 0 ? Math.round((stats.wins / (stats.wins + stats.losses)) * 100) : null;
   const initials = player.display_name.trim().slice(0, 2).toUpperCase();
 
@@ -239,7 +231,29 @@ export function ProfileScreen() {
               <Bell color="#176b5b" size={16} />
               <Text className="text-base font-bold text-[#17231f]">Notifications</Text>
             </View>
-            {unreadCount > 0 ? <Badge label={`${unreadCount} new`} tone="accent" /> : null}
+            <View className="flex-row items-center gap-2">
+              {unreadCount > 0 ? <Badge label={`${unreadCount} new`} tone="accent" /> : null}
+              {notifications.length > 0 ? (
+                <Pressable
+                  accessibilityLabel="Delete all notifications"
+                  accessibilityRole="button"
+                  className="h-8 w-8 items-center justify-center rounded-lg active:bg-[#f9e4e2]"
+                  hitSlop={6}
+                  onPress={() =>
+                    Alert.alert('Delete all notifications', 'This will permanently remove every notification.', [
+                      { text: 'Keep', style: 'cancel' },
+                      {
+                        text: 'Delete all',
+                        style: 'destructive',
+                        onPress: () => void notificationRepository.deleteAllForUser(db, user!.id).then(load).catch(() => {}),
+                      },
+                    ])
+                  }
+                >
+                  <Trash2 color="#a93232" size={17} />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
           {notifications.length === 0 ? (
             <Text className="mt-3 text-sm leading-5 text-[#65736c]">
@@ -256,16 +270,6 @@ export function ProfileScreen() {
               </View>
             ))
           )}
-          {unreadCount > 0 ? (
-            <View className="mt-3">
-              <Button
-                onPress={() => void notificationRepository.markAllRead(db, user!.id).then(load)}
-                variant="secondary"
-              >
-                Mark all as read
-              </Button>
-            </View>
-          ) : null}
         </Card>
 
         <Card className="mt-4 px-4 py-4">
@@ -298,39 +302,6 @@ export function ProfileScreen() {
           )}
         </Card>
 
-        <ProfileSection
-          icon={<Trophy color="#176b5b" size={16} />}
-          title={`Created by you (${created.length})`}
-          emptyLabel="You have not created any tournaments yet."
-        >
-          {created.map((tournament) => (
-            <TournamentCard
-              key={tournament.id}
-              tournament={tournament}
-              gameName={tournament.game_name}
-              countryName={tournament.country_name}
-              onPress={() => navigation.navigate('TournamentDetail', { tournamentId: tournament.id })}
-            />
-          ))}
-        </ProfileSection>
-
-        <ProfileSection
-          icon={<UserRound color="#176b5b" size={16} />}
-          title={`Participating (${participating.length})`}
-          emptyLabel="You are not registered in any tournament yet."
-        >
-          {participating.map((tournament) => (
-            <TournamentCard
-              key={tournament.id}
-              tournament={tournament}
-              gameName={tournament.game_name}
-              countryName={tournament.country_name}
-              organizerName={tournament.organizer_username}
-              onPress={() => navigation.navigate('TournamentDetail', { tournamentId: tournament.id })}
-            />
-          ))}
-        </ProfileSection>
-
         <Card className="mt-4 px-4 py-4">
           <Text className="text-base font-bold text-[#17231f]">Match history</Text>
           {history.length === 0 ? (
@@ -340,10 +311,8 @@ export function ProfileScreen() {
           ) : (
             history.map((match) => {
               const isPlayerOne = match.player_one_id === player.id;
-              const ownScore = isPlayerOne ? match.score_one : match.score_two;
-              const opponentScore = isPlayerOne ? match.score_two : match.score_one;
               const opponentName = isPlayerOne ? match.player_two_name : match.player_one_name;
-              const won = match.winner_id === player.id;
+              const won = match.winner_id === player.id || match.own_eliminated === 0;
               return (
                 <Pressable
                   key={match.id}
@@ -359,7 +328,6 @@ export function ProfileScreen() {
                       {match.game_name} · vs {opponentName ?? 'Unknown'} · R{match.round_number} M{match.match_number}
                     </Text>
                   </View>
-                  <Text className="text-sm font-bold text-[#17231f]">{ownScore ?? '–'} - {opponentScore ?? '–'}</Text>
                 </Pressable>
               );
             })
@@ -367,8 +335,7 @@ export function ProfileScreen() {
         </Card>
 
         <View className="mt-5 gap-3">
-          <Button onPress={() => navigation.navigate('EditProfile')} variant="secondary">Edit profile</Button>
-          <Button onPress={() => void signOut()} variant="quiet">Sign out</Button>
+          <Button icon={<DoorOpen color="#ffffff" size={16} />} iconPosition="right" onPress={() => void signOut()} variant="danger">Sign out</Button>
         </View>
 
         {__DEV__ && (
@@ -404,23 +371,4 @@ function StatCard({ label, value }: { label: string; value: number }) {
   );
 }
 
-function ProfileSection({ icon, title, emptyLabel, children }: { icon: React.ReactNode; title: string; emptyLabel: string; children: React.ReactNode }) {
-  return (
-    <View className="mt-4">
-      <View className="mb-2 flex-row items-center gap-2">
-        {icon}
-        <Text className="text-base font-bold text-[#17231f]">{title}</Text>
-      </View>
-      <View className="gap-3">
-        {Array.isArray(children) && children.length === 0 ? (
-          <Card className="items-center px-4 py-5">
-            <MapPin color="#85928b" size={18} />
-            <Text className="mt-2 text-center text-sm text-[#65736c]">{emptyLabel}</Text>
-          </Card>
-        ) : (
-          children
-        )}
-      </View>
-    </View>
-  );
-}
+

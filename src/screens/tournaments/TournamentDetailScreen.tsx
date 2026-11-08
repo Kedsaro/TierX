@@ -1,9 +1,11 @@
 import {
+  Ban,
   CalendarClock,
   CalendarPlus,
   ChevronLeft,
   Flag,
   Globe2,
+  KeyRound,
   MapPin,
   Pencil,
   ShieldCheck,
@@ -26,7 +28,7 @@ import { DateTimeField } from '../../components/ui/DateTimeField';
 import { FeedbackState } from '../../components/ui/FeedbackState';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
-import { eventRepository, registrationRepository, reportRepository, tournamentRepository, userRepository } from '../../database/repositories';
+import { eventRepository, matchRepository, registrationRepository, reportRepository, tournamentRepository, userRepository } from '../../database/repositories';
 import { notifyTournamentFollowers, notifyUser } from '../../notifications/dispatch';
 import { useCurrentPlayer } from '../../hooks/useCurrentPlayer';
 import type { TournamentDetailParams } from '../../navigation/tournaments/types';
@@ -58,8 +60,6 @@ const statusTones = {
 } as const;
 
 const scopeLabels: Record<Tournament['scope'], string> = {
-  local: 'Local',
-  regional: 'Regional',
   national: 'National',
   international: 'International',
 };
@@ -83,11 +83,13 @@ const actionLabels: Record<TournamentAction, string> = {
   unpublish: 'Unpublish',
   cancel: 'Cancel tournament',
   close: 'Close tournament',
+  start: 'Start Tournament',
 };
 
 const actionConfirmations: Partial<Record<TournamentAction, string>> = {
   cancel: 'This will cancel the tournament for everyone. Are you sure?',
   close: 'This will mark the tournament as completed. Are you sure?',
+  start: 'This will start the tournament right now, ahead of its scheduled start date. The end date stays the same. Continue?',
 };
 
 const registrationStatusLabels: Record<RegistrationStatus, string> = {
@@ -125,10 +127,12 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [registration, setRegistration] = useState<Registration | null>(null);
+  const [isEliminated, setIsEliminated] = useState(false);
   const [isRegistrationLoading, setIsRegistrationLoading] = useState(true);
   const [isRegistrationModalVisible, setIsRegistrationModalVisible] = useState(false);
   const [isSubmittingRegistration, setIsSubmittingRegistration] = useState(false);
   const [registrationError, setRegistrationError] = useState<string | null>(null);
+  const [accessCodeInput, setAccessCodeInput] = useState('');
 
   const [events, setEvents] = useState<TournamentEvent[]>([]);
   const [isCreateEventModalVisible, setIsCreateEventModalVisible] = useState(false);
@@ -186,10 +190,14 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
     const fetchRegistration = player
       ? registrationRepository.getForPlayer(db, tournamentId, player.id)
       : Promise.resolve(null);
-    fetchRegistration.then(
-      (result) => {
+    const fetchEliminated = player
+      ? matchRepository.listEliminatedPlayerIds(db, tournamentId).then((ids) => ids.includes(player.id))
+      : Promise.resolve(false);
+    Promise.all([fetchRegistration, fetchEliminated]).then(
+      ([result, eliminated]) => {
         if (!isCurrent) return;
         setRegistration(result);
+        setIsEliminated(eliminated);
         setIsRegistrationLoading(false);
       },
       () => {
@@ -242,15 +250,30 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
     }
   }
 
+  function openRegistrationModal() {
+    setAccessCodeInput('');
+    setRegistrationError(null);
+    setIsRegistrationModalVisible(true);
+  }
+
   async function handleRegister() {
-    if (!player) return;
+    if (!player || !tournament) return;
+    // Private tournaments gate registration behind the organizer's 8-digit code.
+    if (tournament.visibility === 'private') {
+      if (!/^\d{8}$/.test(accessCodeInput.trim())) {
+        setRegistrationError('Enter the 8-digit access code for this tournament.');
+        return;
+      }
+      if (accessCodeInput.trim() !== tournament.access_code) {
+        setRegistrationError('Incorrect access code. Ask the organizer for the right one.');
+        return;
+      }
+    }
     setIsSubmittingRegistration(true);
     setRegistrationError(null);
     try {
       await registrationRepository.register(db, tournamentId, player.id);
-      if (tournament) {
-        await notifyUser(db, tournament.organizer_id, 'registration', 'New registration', `${player.display_name} registered for "${tournament.name}".`);
-      }
+      await notifyUser(db, tournament.organizer_id, 'registration', 'New registration', `${player.display_name} registered for "${tournament.name}".`);
       setIsRegistrationModalVisible(false);
       loadTournament();
       loadRegistration();
@@ -417,7 +440,11 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
           </View>
           <Text className="mt-4 text-2xl font-bold text-[#17231f]">{tournament.name}</Text>
           <View className="mt-2 flex-row flex-wrap gap-2">
-            <Badge label={statusLabels[tournament.status]} tone={statusTones[tournament.status]} />
+            {registration?.status === 'rejected' ? (
+              <Badge label="Banned" tone="danger" />
+            ) : (
+              <Badge label={statusLabels[tournament.status]} tone={statusTones[tournament.status]} />
+            )}
             <Badge label={scopeLabels[tournament.scope]} tone="accent" />
             <Badge label={tournament.visibility === 'public' ? 'Public' : tournament.visibility === 'private' ? 'Private' : 'Unlisted'} />
           </View>
@@ -436,22 +463,13 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
               value={`${tournament.participant_count} / ${tournament.capacity}`}
             />
             <DetailRow icon={<ShieldCheck color="#176b5b" size={18} />} label="Format" value={tournament.format} />
+            {isOrganizer && tournament.visibility === 'private' && tournament.access_code ? (
+              <DetailRow icon={<KeyRound color="#176b5b" size={18} />} label="Access code (share with invited players)" value={tournament.access_code} />
+            ) : null}
           </Card>
 
           <Text className="mb-2 mt-5 text-sm font-bold uppercase tracking-wide text-[#65736c]">Calendar</Text>
           <Card className="gap-4 p-4">
-            <DetailRow
-              icon={<CalendarClock color="#176b5b" size={18} />}
-              label="Starts"
-              value={formatDateTime(tournament.start_at, tournament.timezone) ?? 'Not set'}
-            />
-            {tournament.end_at ? (
-              <DetailRow
-                icon={<CalendarClock color="#176b5b" size={18} />}
-                label="Ends"
-                value={formatDateTime(tournament.end_at, tournament.timezone) ?? 'Not set'}
-              />
-            ) : null}
             {tournament.registration_opens_at ? (
               <DetailRow
                 icon={<Globe2 color="#176b5b" size={18} />}
@@ -464,6 +482,18 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                 icon={<Globe2 color="#176b5b" size={18} />}
                 label="Registration closes"
                 value={formatDateTime(tournament.registration_closes_at, tournament.timezone) ?? 'Not set'}
+              />
+            ) : null}
+            <DetailRow
+              icon={<CalendarClock color="#176b5b" size={18} />}
+              label="Starts"
+              value={formatDateTime(tournament.start_at, tournament.timezone) ?? 'Not set'}
+            />
+            {tournament.end_at ? (
+              <DetailRow
+                icon={<CalendarClock color="#176b5b" size={18} />}
+                label="Ends"
+                value={formatDateTime(tournament.end_at, tournament.timezone) ?? 'Not set'}
               />
             ) : null}
           </Card>
@@ -515,23 +545,22 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                 </View>
               ) : null}
               <View className="gap-3">
-                {availableActions(tournament.status).includes('edit') ? (
-                  <Button
-                    icon={<Pencil color="#176b5b" size={16} />}
-                    onPress={() => navigation.navigate('TournamentForm', { tournamentId: tournament.id })}
-                    variant="secondary"
-                  >
-                    Edit
-                  </Button>
-                ) : null}
+                <Button
+                  disabled={tournament.status === 'ongoing' || tournament.status === 'completed'}
+                  icon={<Users color="#176b5b" size={16} />}
+                  onPress={() => navigation.navigate('ManageParticipants', { tournamentId: tournament.id })}
+                  variant="secondary"
+                >
+                  Manage Participants
+                </Button>
                 {availableActions(tournament.status)
-                  .filter((action) => action !== 'edit')
+                  .filter((action) => action === 'publish')
                   .map((action) => (
                     <Button
                       key={action}
                       loading={pendingAction === action}
                       onPress={() => void runAction(action)}
-                      variant={action === 'cancel' ? 'danger' : action === 'publish' ? 'primary' : 'secondary'}
+                      variant="primary"
                     >
                       {actionLabels[action]}
                     </Button>
@@ -543,6 +572,39 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                 >
                   {tournament.status === 'completed' ? 'Bracket results' : 'Manage bracket'}
                 </Button>
+                {availableActions(tournament.status)
+                  .filter((action) => action === 'cancel')
+                  .map((action) => (
+                    <Button
+                      key={action}
+                      loading={pendingAction === action}
+                      onPress={() => void runAction(action)}
+                      variant="danger"
+                    >
+                      {actionLabels[action]}
+                    </Button>
+                  ))}
+                {availableActions(tournament.status)
+                  .filter((action) => action === 'start')
+                  .map((action) => (
+                    <Button
+                      key={action}
+                      loading={pendingAction === action}
+                      onPress={() => void runAction(action)}
+                      variant="primary"
+                    >
+                      {actionLabels[action]}
+                    </Button>
+                  ))}
+                {availableActions(tournament.status).includes('edit') ? (
+                  <Button
+                    icon={<Pencil color="#176b5b" size={16} />}
+                    onPress={() => navigation.navigate('TournamentForm', { tournamentId: tournament.id })}
+                    variant="secondary"
+                  >
+                    Edit Tournament Configuration
+                  </Button>
+                ) : null}
               </View>
             </View>
           ) : null}
@@ -574,14 +636,27 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                     label={registrationStatusLabels[registration.status]}
                     tone={registration.status === 'waitlisted' ? 'warning' : 'success'}
                   />
-                  <Button
-                    icon={<UserMinus color="#ffffff" size={16} />}
-                    loading={isSubmittingRegistration}
-                    onPress={() => void handleCancelRegistration()}
-                    variant="danger"
-                  >
-                    Cancel registration
+                  {isEliminated ? (
+                    <Button disabled icon={<Ban color="#ffffff" size={16} />} onPress={() => {}} variant="danger">
+                      You were ELIMINATED
+                    </Button>
+                  ) : tournament.status === 'ongoing' || tournament.status === 'completed' ? null : (
+                    <Button
+                      icon={<UserMinus color="#ffffff" size={16} />}
+                      loading={isSubmittingRegistration}
+                      onPress={() => void handleCancelRegistration()}
+                      variant="danger"
+                    >
+                      Cancel registration
+                    </Button>
+                  )}
+                </View>
+              ) : registration?.status === 'rejected' ? (
+                <View className="gap-2">
+                  <Button disabled icon={<Ban color="#ffffff" size={16} />} onPress={() => {}} variant="danger">
+                    Blocked
                   </Button>
+                  <Text className="text-xs text-[#65736c]">The organizer removed you, so you cannot register again.</Text>
                 </View>
               ) : (
                 <View className="gap-2">
@@ -589,7 +664,7 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                     disabled={!eligibility.canRegister}
                     icon={<UserPlus color="#ffffff" size={16} />}
                     loading={isSubmittingRegistration}
-                    onPress={() => setIsRegistrationModalVisible(true)}
+                    onPress={openRegistrationModal}
                   >
                     Register
                   </Button>
@@ -598,6 +673,16 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                   ) : null}
                 </View>
               )}
+              {tournament.status === 'ongoing' ? (
+                <Button
+                  className="mt-3"
+                  icon={<Swords color="#176b5b" size={16} />}
+                  onPress={() => navigation.navigate('Bracket', { tournamentId: tournament.id })}
+                  variant="secondary"
+                >
+                  Check Bracket
+                </Button>
+              ) : null}
             </View>
           ) : null}
         </ScrollView>
@@ -635,6 +720,21 @@ export function TournamentDetailScreen({ route, navigation }: TournamentDetailSc
                 <Text className="mb-1 text-xs font-bold uppercase tracking-wide text-[#65736c]">Requirements</Text>
                 <Text className="text-sm leading-5 text-[#4d5d55]">{tournament.requirements}</Text>
               </View>
+            ) : null}
+            {tournament.visibility === 'private' ? (
+              <Input
+                autoCapitalize="none"
+                hint="This is a private tournament. Ask the organizer for the 8-digit access code."
+                keyboardType="number-pad"
+                label="Access code"
+                maxLength={8}
+                onChangeText={(text) => setAccessCodeInput(text.replace(/[^0-9]/g, ''))}
+                placeholder="8 digits"
+                value={accessCodeInput}
+              />
+            ) : null}
+            {registrationError ? (
+              <Text accessibilityRole="alert" className="text-sm text-[#a93232]">{registrationError}</Text>
             ) : null}
             <Text className="text-xs text-[#65736c]">By confirming, you declare that you meet the requirements above.</Text>
           </View>

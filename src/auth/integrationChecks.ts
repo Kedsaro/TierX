@@ -21,9 +21,9 @@ class MemorySessionStore {
 export async function runAuthIntegrationChecks(db: SQLiteDatabase): Promise<void> {
   const sessionStore = new MemorySessionStore();
   const authService = createAuthService(db, sessionStore);
-  const suffix = `${Date.now()}`;
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const email = `auth-check-${suffix}@example.invalid`;
-  const username = `auth-check-${suffix}`;
+  const username = `auth-check-${suffix}`.slice(0, 24);
   const password = 'TestPass12';
   let userId: number | null = null;
 

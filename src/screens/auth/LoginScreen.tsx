@@ -9,7 +9,7 @@ import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../auth/AuthProvider';
 import { AuthError } from '../../auth/authService';
 import { validateLogin } from '../../auth/validation';
-import { cleanupTestUsers, listAllUsers, createTestUser } from '../../utils/databaseCleanup';
+import { cleanupTestUsers, listAllUsers, createTestUser, resetAllRankings } from '../../utils/databaseCleanup';
 import { useSQLiteContext } from 'expo-sqlite';
 import type { AuthStackParamList } from '../../navigation/auth/types';
 
@@ -93,9 +93,14 @@ export function LoginScreen({ navigation }: Props) {
 
     try {
       const result = await createTestUser(db, cleanEmail);
+      const extraUsers: string[] = [];
+      for (let n = 2; n <= 7; n++) {
+        const extra = await createTestUser(db, `testuser${n}@tierx.demo`, `testuser${n}`);
+        extraUsers.push(`${extra.user.username} (${extra.user.email})`);
+      }
       Alert.alert(
-        'Test User Created',
-        `Username: ${result.user.username}\nPassword: ${result.password}\nEmail: ${result.user.email}\n\nThe account is active and ready to sign in.`,
+        'Test Users Created',
+        `Username: ${result.user.username}\nPassword: ${result.password}\nEmail: ${result.user.email}\n\nAlso created:\n${extraUsers.join('\n')}\n\nAll use password ${result.password}.`,
       );
       // Pre-fill the login form
       setLogin(result.user.username);
@@ -186,6 +191,12 @@ export function LoginScreen({ navigation }: Props) {
                 >
                   <Trash2 color="#872822" size={16} />
                   <Text className="text-sm font-semibold text-[#872822]">Delete All</Text>
+                </Pressable>
+                <Pressable 
+                  className="flex-1 flex-row items-center justify-center gap-2 rounded-lg bg-[#e1e7e2] px-4 py-3"
+                  onPress={() => void resetAllRankings(db).then(() => Alert.alert('Rankings reset', 'All wins/losses were reset to 0.'))}
+                >
+                  <Text className="text-sm font-semibold text-[#176b5b]">Reset Wins</Text>
                 </Pressable>
               </View>
 

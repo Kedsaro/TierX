@@ -14,6 +14,7 @@ interface SelectProps<T extends string | number> {
   options: SelectOption<T>[];
   onChange: (value: T) => void;
   placeholder?: string;
+  disabled?: boolean;
   error?: string;
   accessibilityLabel?: string;
 }
@@ -24,6 +25,7 @@ export function Select<T extends string | number>({
   options,
   onChange,
   placeholder = 'Select an option',
+  disabled = false,
   error,
   accessibilityLabel,
 }: SelectProps<T>) {
@@ -37,7 +39,9 @@ export function Select<T extends string | number>({
       <Pressable
         accessibilityLabel={accessibilityLabel ?? label}
         accessibilityRole="button"
-        className={`min-h-12 flex-row items-center justify-between rounded-lg border bg-white px-3 ${border}`}
+        accessibilityState={{ disabled }}
+        className={`min-h-12 flex-row items-center justify-between rounded-lg border bg-white px-3 ${border} ${disabled ? 'opacity-50' : ''}`}
+        disabled={disabled}
         onPress={() => setVisible(true)}
       >
         <Text className={`text-base ${selected ? 'text-[#17231f]' : 'text-[#85928b]'}`} numberOfLines={1}>

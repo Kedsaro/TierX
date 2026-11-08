@@ -32,4 +32,6 @@ export interface MatchHistoryItem extends MatchDetails {
   tournament_id: number;
   tournament_name: string;
   game_name: string;
+  /** 0 if the player survived the match as a multi-player participant, 1 if eliminated, null for 1v1 fields only. */
+  own_eliminated: number | null;
 }

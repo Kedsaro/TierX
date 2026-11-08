@@ -1,7 +1,7 @@
 import { Calendar, Clock } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import DateTimePicker, { type DateTimePickerChangeEvent } from '@react-native-community/datetimepicker';
 import { snapToFiveMinutes } from '../../tournaments/validation';
 
 interface DateTimeFieldProps {
@@ -104,9 +104,12 @@ export function DateTimeField({
     setStage('date');
   }
 
-  function handleDateChange(event: DateTimePickerEvent, selected?: Date) {
+  function handleDismiss() {
     setStage('none');
-    if (event.type === 'dismissed' || !selected) return;
+  }
+
+  function handleDateChange(_event: DateTimePickerChangeEvent, selected: Date) {
+    setStage('none');
     const next = new Date(selected);
     if (pendingDate) {
       next.setHours(pendingDate.getHours(), pendingDate.getMinutes());
@@ -115,9 +118,9 @@ export function DateTimeField({
     setStage('time');
   }
 
-  function handleTimeChange(event: DateTimePickerEvent, selected?: Date) {
+  function handleTimeChange(_event: DateTimePickerChangeEvent, selected: Date) {
     setStage('none');
-    if (event.type === 'dismissed' || !selected || !pendingDate) return;
+    if (!pendingDate) return;
     const next = new Date(pendingDate);
     next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
     // RF-20: only multiples of 5 minutes are allowed. Android's native clock
@@ -152,12 +155,13 @@ export function DateTimeField({
           maximumDate={maxDate}
           minimumDate={minDate}
           mode="date"
-          onChange={handleDateChange}
+          onDismiss={handleDismiss}
+          onValueChange={handleDateChange}
           value={pendingDate ?? minDate}
         />
       ) : null}
       {stage === 'time' ? (
-        <DateTimePicker minuteInterval={5} mode="time" onChange={handleTimeChange} value={pendingDate ?? minDate} />
+        <DateTimePicker minuteInterval={5} mode="time" onDismiss={handleDismiss} onValueChange={handleTimeChange} value={pendingDate ?? minDate} />
       ) : null}
     </View>
   );
